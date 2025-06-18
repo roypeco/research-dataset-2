@@ -107,6 +107,12 @@ def check_file_exists(file_path):
     """ファイルが存在するか確認"""
     return os.path.exists(file_path)
 
+def has_python_files_in_diff(repo_path, commit):
+    """diffにPythonファイルが含まれているか確認"""
+    result = subprocess.run(['git', 'diff', '--name-only', f'{commit}^!'], cwd=repo_path, capture_output=True, text=True)
+    files = result.stdout.strip().split('\n')
+    return any(file.endswith('.py') for file in files)
+
 def main():
     with open('jsons/test.json', 'r') as f:
         repos = json.load(f)
@@ -157,6 +163,10 @@ def main():
 
             # 各コミットで違反の状態を確認
             for i, commit in enumerate(commits[1:], 1):  # 最初のコミットは除く
+                # diffにPythonファイルがない場合はスキップ
+                if not has_python_files_in_diff(temp_dir, commit):
+                    continue
+                    
                 subprocess.run(['git', 'checkout', commit], cwd=temp_dir, check=True)
                 current_violations = parse_flake8_output(run_flake8(temp_dir), temp_dir)
                 
