@@ -22,6 +22,26 @@ class DataManager:
             for commit in commits:
                 writer.writerow([commit])
     
+    def _get_violation_category(self, violation_id):
+        """警告IDからカテゴリーを判定する"""
+        if not violation_id:
+            return ''
+        
+        # 最初の文字でカテゴリーを判定
+        first_char = violation_id[0].upper()
+        if first_char == 'E':
+            return 'Error'
+        elif first_char == 'W':
+            return 'Warning'
+        elif first_char == 'F':
+            return 'Fatal'
+        elif first_char == 'C':
+            return 'Complexity'
+        elif first_char == 'N':
+            return 'Naming'
+        else:
+            return 'Other'
+    
     def create_fix_history_csv(self, pkg_name, initial_violations, initial_commit):
         """修正履歴のCSVファイルを作成"""
         result_dir = Path('dataset') / pkg_name
@@ -30,9 +50,10 @@ class DataManager:
         csv_file = result_dir / 'fix_history.csv'
         with open(csv_file, 'w', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow(['Violation ID', 'File Path', 'Message', 'Context', 'Error Commit Hash', 'Fix Commit Hash', 'Fixed'])
+            writer.writerow(['Violation ID', 'Category', 'File Path', 'Message', 'Context', 'Error Commit Hash', 'Fix Commit Hash', 'Fixed'])
             for violation in initial_violations:
-                writer.writerow([violation[0], violation[1], violation[2], violation[3], initial_commit, '', 'False'])
+                category = self._get_violation_category(violation[0])
+                writer.writerow([violation[0], category, violation[1], violation[2], violation[3], initial_commit, '', 'False'])
         
         return csv_file
     
@@ -47,7 +68,7 @@ class DataManager:
         
         # 既存の違反データを読み込み
         for row in rows[1:]:
-            violation_id, file_path, message, context, error_commit, fix_commit, fixed = row
+            violation_id, category, file_path, message, context, error_commit, fix_commit, fixed = row
             violation_key = (violation_id, file_path, message, context)
             existing_violations.add(violation_key)
             violation_data[violation_key] = {
@@ -62,20 +83,21 @@ class DataManager:
             
             # 既存の違反を処理
             for row in rows[1:]:
-                violation_id, file_path, message, context, error_commit, fix_commit, fixed = row
+                violation_id, category, file_path, message, context, error_commit, fix_commit, fixed = row
                 violation_key = (violation_id, file_path, message, context)
                 
                 # ファイルが存在し、かつ違反が修正された場合
                 if self._check_file_exists(os.path.join(temp_dir, file_path)) and violation_key not in current_violations:
                     if fixed == 'False':  # まだ修正されていない場合のみ
-                        row[5] = current_commit  # Fix Commit Hashを設定
-                        row[6] = 'True'  # FixedをTrueに設定
+                        row[6] = current_commit  # Fix Commit Hashを設定
+                        row[7] = 'True'  # FixedをTrueに設定
                 writer.writerow(row)
             
             # 新規違反を追加
             for violation in current_violations:
                 if violation not in existing_violations:
-                    writer.writerow([violation[0], violation[1], violation[2], violation[3], current_commit, '', 'False'])
+                    category = self._get_violation_category(violation[0])
+                    writer.writerow([violation[0], category, violation[1], violation[2], violation[3], current_commit, '', 'False'])
     
     def _check_file_exists(self, file_path):
         """ファイルが存在するか確認（内部メソッド）"""
