@@ -22,10 +22,10 @@ class RepositoryManager:
             return False
     
     def get_commits_in_date_range(self, repo_path, start_date, end_date):
-        """指定された日付範囲のコミットを取得する"""
+        """指定された日付範囲のマージコミットを取得する"""
         result = subprocess.run([
             'git', 'log', '--since', start_date, '--until', end_date, 
-            '--format=%H', '--reverse'
+            '--format=%H', '--reverse', '--merges'
         ], cwd=repo_path, capture_output=True, text=True)
         return result.stdout.strip().split('\n')
     
