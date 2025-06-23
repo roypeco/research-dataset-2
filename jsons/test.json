@@ -6,5 +6,13 @@
 		"forks": 17448,
 		"stars": 42326,
 		"latest_release_published_at": "2024-04-10T19:44:10.000Z"
+	},
+	{
+		"sourceRank": 1514,
+		"pkgName": "transitions",
+		"repository_url": "https://github.com/pytransitions/transitions",
+		"forks": 521,
+		"stars": 5411,
+		"latest_release_published_at": "2024-05-14T15:30:09.000Z"
 	}
 ]
