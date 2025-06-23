@@ -51,19 +51,24 @@ class Flake8Analyzer:
             return ""
     
     def parse_flake8_output(self, output, repo_path):
-        """flake8の出力を解析して違反リストを作成"""
+        """flake8の出力を解析して違反リストを作成（行番号付き）"""
         violations = []
         for line in output.split('\n'):
             if line.strip():
                 parts = line.split(':')
                 if len(parts) >= 4:
-                    file_path = os.path.join(repo_path, parts[0])
+                    file_path = parts[0]
                     line_number = parts[1]
+                    column_number = parts[2]
                     error_code = parts[3].split()[0]
                     message = parts[3].split(' ', 1)[1] if len(parts[3].split()) > 1 else ''
                     
-                    context = self.get_violation_context(file_path, line_number)
-                    violation_key = (error_code, parts[0], message, context)
+                    # 行番号を含むコンテキストを取得
+                    full_file_path = os.path.join(repo_path, file_path)
+                    context = self.get_violation_context(full_file_path, line_number)
+                    
+                    # 行番号を含む違反キーを作成
+                    violation_key = (error_code, file_path, message, context, line_number)
                     violations.append(violation_key)
         return violations
     

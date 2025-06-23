@@ -12,7 +12,7 @@ class RepoAnalyzer:
         self.flake8_analyzer = Flake8Analyzer()
         self.data_manager = DataManager()
     
-    def analyze_repository(self, repo_url, pkg_name, start_date='2022-01-01', end_date='2022-01-04'):
+    def analyze_repository(self, repo_url, pkg_name, start_date='2022-01-01', end_date='2022-01-05'):
         """単一のリポジトリを分析する"""
         temp_dir = os.path.abspath(f"temp_{pkg_name}")
         
@@ -45,7 +45,7 @@ class RepoAnalyzer:
             )
             
             # CSVファイルの作成
-            csv_file = self.data_manager.create_fix_history_csv(pkg_name, initial_violations, commits[0])
+            csv_file = self.data_manager.create_fix_history_csv(pkg_name, initial_violations, commits[0], temp_dir)
 
             # 各コミットで違反の状態を確認
             for commit in commits[1:]:  # 最初のコミットは除く
