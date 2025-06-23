@@ -12,7 +12,7 @@ class RepoAnalyzer:
         self.flake8_analyzer = Flake8Analyzer()
         self.data_manager = DataManager()
     
-    def analyze_repository(self, repo_url, pkg_name, start_date='2022-01-01', end_date='2022-01-05'):
+    def analyze_repository(self, repo_url, pkg_name, start_date='2022-01-01', end_date='2022-03-31'):
         """単一のリポジトリを分析する"""
         temp_dir = os.path.abspath(f"temp_{pkg_name}")
         
