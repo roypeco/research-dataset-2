@@ -51,7 +51,7 @@ class DataManager:
         return [
             # 基本情報
             'Violation ID', 'Category', 'File Path', 'Message', 'Context', 
-            'Error Commit Hash', 'Fix Commit Hash', 'Fixed',
+            'Error Commit Hash', 'Fix Commit Hash',
             # ファイルレベルの特徴量
             'File Size', 'Total Lines', 'Code Lines', 'Comment Lines', 'Blank Lines',
             'File Depth', 'File Extension', 'Filename Length',
@@ -66,7 +66,9 @@ class DataManager:
             'Total Functions', 'Total Classes', 'Total Imports', 'Total Variables',
             'Cyclomatic Complexity', 'File Change Frequency',
             # 時間ベースの特徴量（論文のF40, F46）
-            'Lines Added Past 25 Revisions', 'Lines Added Past 3 Months'
+            'Lines Added Past 25 Revisions', 'Lines Added Past 3 Months',
+            # 修正状態（最終列）
+            'Fixed'
         ]
     
     def _extract_features_for_violation(self, violation, temp_dir):
@@ -167,8 +169,8 @@ class DataManager:
                 # 基本情報 + 特徴量
                 row = [
                     violation[0], category, violation[1], violation[2], violation[3],
-                    initial_commit, '', 'False'
-                ] + features
+                    initial_commit, ''
+                ] + features + ['False']
                 
                 writer.writerow(row)
         
@@ -185,7 +187,8 @@ class DataManager:
         
         # 既存の違反データを読み込み
         for row in rows[1:]:
-            violation_id, category, file_path, message, context, error_commit, fix_commit, fixed = row[:8]
+            violation_id, category, file_path, message, context, error_commit, fix_commit = row[:7]
+            fixed = row[-1]  # Fixedは最後の列
             # 行番号を除いて同一性を判定（違反ID、ファイルパス、メッセージ、コンテキストのみ）
             violation_key = (violation_id, file_path, message, context)
             existing_violations.add(violation_key)
@@ -201,7 +204,8 @@ class DataManager:
             
             # 既存の違反を処理
             for row in rows[1:]:
-                violation_id, category, file_path, message, context, error_commit, fix_commit, fixed = row[:8]
+                violation_id, category, file_path, message, context, error_commit, fix_commit = row[:7]
+                fixed = row[-1]  # Fixedは最後の列
                 # 行番号を除いて同一性を判定
                 violation_key = (violation_id, file_path, message, context)
                 
@@ -209,7 +213,7 @@ class DataManager:
                 if self._check_file_exists(os.path.join(temp_dir, file_path)) and violation_key not in existing_violations:
                     if fixed == 'False':  # まだ修正されていない場合のみ
                         row[6] = current_commit  # Fix Commit Hashを設定
-                        row[7] = 'True'  # FixedをTrueに設定
+                        row[-1] = 'True'  # FixedをTrueに設定（最後の列）
                 writer.writerow(row)
             
             # 新規違反を追加
@@ -230,7 +234,7 @@ class DataManager:
                     row = [
                         violation[0], category, violation[1], violation[2], violation[3],
                         current_commit, '', 'False'
-                    ] + features
+                    ] + features + ['False']
                     
                     writer.writerow(row)
     
