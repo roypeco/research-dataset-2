@@ -182,21 +182,16 @@ class DataManager:
             reader = csv.reader(f)
             rows = list(reader)
         
-        existing_violations = set()
-        violation_data = {}  # 既存の違反データを保持
-        
-        # 既存の違反データを読み込み
-        for row in rows[1:]:
-            violation_id, category, file_path, message, context, error_commit, fix_commit = row[:7]
-            fixed = row[-1]  # Fixedは最後の列
-            # 行番号を除いて同一性を判定（違反ID、ファイルパス、メッセージ、コンテキストのみ）
-            violation_key = (violation_id, file_path, message, context)
-            existing_violations.add(violation_key)
-            violation_data[violation_key] = {
-                'error_commit': error_commit,
-                'fix_commit': fix_commit,
-                'fixed': fixed
-            }
+        # 現在の違反をセットに変換（行番号を除いて同一性を判定）
+        current_violations_set = set()
+        for violation in current_violations:
+            if len(violation) == 5:
+                # 行番号を含む形式から行番号を除く
+                violation_key = (violation[0], violation[1], violation[2], violation[3])
+            else:
+                # 旧形式
+                violation_key = violation
+            current_violations_set.add(violation_key)
         
         with open(csv_file, 'w', newline='') as f:
             writer = csv.writer(f)
@@ -209,11 +204,11 @@ class DataManager:
                 # 行番号を除いて同一性を判定
                 violation_key = (violation_id, file_path, message, context)
                 
-                # ファイルが存在し、かつ違反が修正された場合
-                if self._check_file_exists(os.path.join(temp_dir, file_path)) and violation_key not in existing_violations:
-                    if fixed == 'False':  # まだ修正されていない場合のみ
-                        row[6] = current_commit  # Fix Commit Hashを設定
-                        row[-1] = 'True'  # FixedをTrueに設定（最後の列）
+                # 既存の違反が現在のコミットで検出されない場合（修正された場合）
+                if violation_key not in current_violations_set and fixed == 'False':
+                    row[6] = current_commit  # Fix Commit Hashを設定
+                    row[-1] = 'True'  # FixedをTrueに設定（最後の列）
+                
                 writer.writerow(row)
             
             # 新規違反を追加
@@ -226,14 +221,22 @@ class DataManager:
                     # 旧形式
                     violation_key = violation
                 
-                if violation_key not in existing_violations:
+                # 既存の行をチェックして、この違反が既に存在するか確認
+                violation_exists = False
+                for row in rows[1:]:
+                    existing_violation_key = (row[0], row[2], row[3], row[4])  # violation_id, file_path, message, context
+                    if violation_key == existing_violation_key:
+                        violation_exists = True
+                        break
+                
+                if not violation_exists:
                     category = self._get_violation_category(violation[0])
                     features = self._extract_features_for_violation(violation, temp_dir)
                     
                     # 基本情報 + 特徴量
                     row = [
                         violation[0], category, violation[1], violation[2], violation[3],
-                        current_commit, '', 'False'
+                        current_commit, ''
                     ] + features + ['False']
                     
                     writer.writerow(row)
