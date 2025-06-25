@@ -14,7 +14,7 @@ class RepoAnalyzer:
         self.data_manager = DataManager()
         self.setup_logging()
         self.START_DATE = '2022-01-01'
-        self.END_DATE = '2022-01-05'
+        self.END_DATE = '2022-03-31'
     
     def setup_logging(self):
         """ログ設定を初期化"""
