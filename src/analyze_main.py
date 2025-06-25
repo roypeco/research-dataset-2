@@ -13,6 +13,8 @@ class RepoAnalyzer:
         self.flake8_analyzer = Flake8Analyzer()
         self.data_manager = DataManager()
         self.setup_logging()
+        self.START_DATE = '2022-01-01'
+        self.END_DATE = '2022-01-05'
     
     def setup_logging(self):
         """ログ設定を初期化"""
@@ -27,7 +29,7 @@ class RepoAnalyzer:
         )
         self.logger = logging.getLogger(__name__)
     
-    def analyze_repository(self, repo_url, pkg_name, start_date='2022-01-01', end_date='2022-01-05'):
+    def analyze_repository(self, repo_url, pkg_name, start_date, end_date):
         """単一のリポジトリを分析する"""
         temp_dir = os.path.abspath(f"temp_{pkg_name}")
         
@@ -145,7 +147,7 @@ class RepoAnalyzer:
             
             overall_progress_percent = (i / total_count) * 100
             self.logger.info(f"=== Repository {i}/{total_count} ({overall_progress_percent:.1f}%): {pkg_name} ===")
-            if self.analyze_repository(repo_url, pkg_name):
+            if self.analyze_repository(repo_url, pkg_name, self.START_DATE, self.END_DATE):
                 success_count += 1
                 self.logger.info(f"✓ Successfully analyzed: {pkg_name}")
             else:
