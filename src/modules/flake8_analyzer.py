@@ -65,6 +65,8 @@ class Flake8Analyzer:
     def parse_flake8_output(self, output, repo_path):
         """flake8の出力を解析して違反リストを作成（行番号付き）"""
         violations = []
+        seen_violations = set()  # 重複チェック用
+        
         for line in output.split('\n'):
             if line.strip():
                 parts = line.split(':')
@@ -79,9 +81,16 @@ class Flake8Analyzer:
                     full_file_path = os.path.join(repo_path, file_path)
                     context = self.get_violation_context(full_file_path, line_number, 0)
                     
-                    # 行番号を含む違反キーを作成
-                    violation_key = (error_code, file_path, message, context, line_number)
-                    violations.append(violation_key)
+                    # 重複チェック用のキーを作成（行番号を除く）
+                    violation_key = (error_code, file_path, message, context)
+                    
+                    # 重複チェック
+                    if violation_key not in seen_violations:
+                        # 行番号を含む違反キーを作成
+                        violation_key_with_line = (error_code, file_path, message, context, line_number)
+                        violations.append(violation_key_with_line)
+                        seen_violations.add(violation_key)
+        
         return violations
     
     def check_file_exists(self, file_path):
