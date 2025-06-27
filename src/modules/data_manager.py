@@ -215,15 +215,20 @@ class DataManager:
                 
                 writer.writerow(row)
             
-            # 新規違反を追加
+            # 新規違反を追加（重複チェック付き）
+            added_violations = set()  # 同じコミット内での重複チェック用
             for violation in current_violations:
                 # 行番号を除いて同一性を判定
                 if len(violation) == 5:
-                    # 行番号を含む形式から行番号を除く
-                    violation_key = (violation[0], violation[1], violation[2], violation[3])
+                    # contextを正規化してから比較
+                    normalized_context = self._normalize_context(violation[3])
+                    violation_key = (violation[0], violation[1], violation[2], normalized_context)
                 else:
-                    # 旧形式
                     violation_key = violation
+                
+                # 同じコミット内での重複チェック
+                if violation_key in added_violations:
+                    continue
                 
                 # 既存の行をチェックして、この違反が既に存在するか確認
                 violation_exists = False
@@ -246,6 +251,7 @@ class DataManager:
                     ] + features + ['False']
                     
                     writer.writerow(row)
+                    added_violations.add(violation_key)  # 追加済みとして記録
     
     def _check_file_exists(self, file_path):
         """ファイルが存在するか確認（内部メソッド）"""
