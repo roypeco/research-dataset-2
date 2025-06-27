@@ -153,7 +153,7 @@ class DataManager:
     
     def _get_default_features(self):
         """デフォルトの特徴量値を取得"""
-        return [0] * 35  # 35個の特徴量のデフォルト値
+        return [0] * 34  # 34個の特徴量のデフォルト値
     
     def create_fix_history_csv(self, pkg_name, initial_violations, initial_commit, temp_dir):
         """修正履歴のCSVファイルを作成（特徴量付き）"""
