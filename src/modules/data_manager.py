@@ -198,7 +198,7 @@ class DataManager:
         
         with open(csv_file, 'w', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow(rows[0])  # ヘッダー
+            writer.writerow(self._get_feature_headers())  # 新しいヘッダーを使用
             
             # 既存の違反を処理
             for row in rows[1:]:
