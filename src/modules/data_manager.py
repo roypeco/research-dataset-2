@@ -67,6 +67,8 @@ class DataManager:
             'Cyclomatic Complexity', 'File Change Frequency',
             # 時間ベースの特徴量（論文のF40, F46）
             'Lines Added Past 25 Revisions', 'Lines Added Past 3 Months',
+            # 違反行番号
+            'Violation Line Number',
             # 修正状態（最終列）
             'Fixed'
         ]
@@ -145,12 +147,13 @@ class DataManager:
             features.get('cyclomatic_complexity', 0),
             features.get('file_change_frequency', 0),
             features.get('lines_added_past_25_revisions', 0),
-            features.get('lines_added_past_3_months', 0)
+            features.get('lines_added_past_3_months', 0),
+            features.get('violation_line_number', 0)
         ]
     
     def _get_default_features(self):
         """デフォルトの特徴量値を取得"""
-        return [0] * 34  # 34個の特徴量のデフォルト値
+        return [0] * 35  # 35個の特徴量のデフォルト値
     
     def create_fix_history_csv(self, pkg_name, initial_violations, initial_commit, temp_dir):
         """修正履歴のCSVファイルを作成（特徴量付き）"""
