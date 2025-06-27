@@ -185,14 +185,14 @@ class DataManager:
             reader = csv.reader(f)
             rows = list(reader)
         
-        # 現在の違反をセットに変換（行番号を除いて同一性を判定）
+        # 現在の違反をセットに変換（正規化を適用）
         current_violations_set = set()
         for violation in current_violations:
             if len(violation) == 5:
-                # 行番号を含む形式から行番号を除く
-                violation_key = (violation[0], violation[1], violation[2], violation[3])
+                # contextを正規化してから比較
+                normalized_context = self._normalize_context(violation[3])
+                violation_key = (violation[0], violation[1], violation[2], normalized_context)
             else:
-                # 旧形式
                 violation_key = violation
             current_violations_set.add(violation_key)
         
@@ -204,11 +204,12 @@ class DataManager:
             for row in rows[1:]:
                 violation_id, category, file_path, message, context, error_commit, fix_commit = row[:7]
                 fixed = row[-1]  # Fixedは最後の列
-                # 行番号を除いて同一性を判定
-                violation_key = (violation_id, file_path, message, context)
+                # 既存のcontextも正規化して比較
+                normalized_existing_context = self._normalize_context(context)
+                existing_violation_key = (violation_id, file_path, message, normalized_existing_context)
                 
                 # 既存の違反が現在のコミットで検出されない場合（修正された場合）
-                if violation_key not in current_violations_set and fixed == 'False':
+                if existing_violation_key not in current_violations_set and fixed == 'False':
                     row[6] = current_commit  # Fix Commit Hashを設定
                     row[-1] = 'True'  # FixedをTrueに設定（最後の列）
                 
@@ -227,7 +228,9 @@ class DataManager:
                 # 既存の行をチェックして、この違反が既に存在するか確認
                 violation_exists = False
                 for row in rows[1:]:
-                    existing_violation_key = (row[0], row[2], row[3], row[4])  # violation_id, file_path, message, context
+                    # 既存のcontextも正規化して比較
+                    normalized_existing_context = self._normalize_context(row[4])
+                    existing_violation_key = (row[0], row[2], row[3], normalized_existing_context)
                     if violation_key == existing_violation_key:
                         violation_exists = True
                         break
@@ -247,3 +250,8 @@ class DataManager:
     def _check_file_exists(self, file_path):
         """ファイルが存在するか確認（内部メソッド）"""
         return Path(file_path).exists() 
+
+    def _normalize_context(self, context):
+        """コンテキストを正規化する"""
+        # 既存のCSVファイルと同じ正規化を適用
+        return context.strip() 
