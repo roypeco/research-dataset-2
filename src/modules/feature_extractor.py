@@ -29,6 +29,8 @@ class FeatureExtractor:
         # モジュールレベルの特徴量
         features.update(self._extract_module_features(file_path, repo_path))
         
+        features['violation_line_number'] = line_number
+        
         return features
     
     def _extract_file_features(self, file_path, repo_path):
