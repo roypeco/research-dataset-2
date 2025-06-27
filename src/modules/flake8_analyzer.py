@@ -42,6 +42,18 @@ class Flake8Analyzer:
         try:
             with open(file_path, 'r') as f:
                 lines = f.readlines()
+                
+                # context_lines=0の場合は違反行のみを取得（正規化済み）
+                if context_lines == 0:
+                    line_idx = int(line_number) - 1  # 0ベースのインデックス
+                    if 0 <= line_idx < len(lines):
+                        # 違反行から空白やタブを削除して正規化
+                        normalized_line = lines[line_idx].strip()
+                        return normalized_line
+                    else:
+                        return ""
+                
+                # 通常の場合は前後のコンテキストを取得
                 start_line = max(0, int(line_number) - context_lines - 1)
                 end_line = min(len(lines), int(line_number) + context_lines)
                 context = ''.join(lines[start_line:end_line])
@@ -65,7 +77,7 @@ class Flake8Analyzer:
                     
                     # 行番号を含むコンテキストを取得
                     full_file_path = os.path.join(repo_path, file_path)
-                    context = self.get_violation_context(full_file_path, line_number)
+                    context = self.get_violation_context(full_file_path, line_number, 0)
                     
                     # 行番号を含む違反キーを作成
                     violation_key = (error_code, file_path, message, context, line_number)
