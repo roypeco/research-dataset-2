@@ -52,7 +52,7 @@ class DataManager:
         """特徴量のヘッダーを取得"""
         return [
             # 基本情報
-            'Violation ID', 'Category', 'File Path', 'Message', 'Context', 
+            'Violation ID', 'Category', 'File Path', 'Message', 'Violation Line Number', 'Context', 
             'Error Commit Hash', 'Fix Commit Hash',
             # ファイルレベルの特徴量
             'File Size', 'Total Lines', 'Code Lines', 'Comment Lines', 'Blank Lines',
@@ -69,8 +69,6 @@ class DataManager:
             'Cyclomatic Complexity', 'File Change Frequency',
             # 時間ベースの特徴量（論文のF40, F46）
             'Lines Added Past 25 Revisions', 'Lines Added Past 3 Months',
-            # 違反行番号
-            'Violation Line Number',
             # 修正状態（最終列）
             'Fixed'
         ]
@@ -149,13 +147,12 @@ class DataManager:
             features.get('cyclomatic_complexity', 0),
             features.get('file_change_frequency', 0),
             features.get('lines_added_past_25_revisions', 0),
-            features.get('lines_added_past_3_months', 0),
-            features.get('violation_line_number', 0)
+            features.get('lines_added_past_3_months', 0)
         ]
     
     def _get_default_features(self):
         """デフォルトの特徴量値を取得"""
-        return [0] * 34  # 34個の特徴量のデフォルト値
+        return [0] * 33  # 33個の特徴量のデフォルト値
     
     def create_fix_history_csv(self, pkg_name, initial_violations, initial_commit, temp_dir):
         """修正履歴のCSVファイルを作成（特徴量付き）"""
@@ -171,9 +168,15 @@ class DataManager:
                 category = self._get_violation_category(violation[0])
                 features = self._extract_features_for_violation(violation, temp_dir)
                 
-                # 基本情報 + 特徴量
+                # 行番号を取得
+                if len(violation) == 5:
+                    line_number = violation[4]
+                else:
+                    line_number = self._extract_line_number_from_context(violation[3])
+                
+                # 基本情報 + 特徴量（行番号をMessageとContextの間に配置）
                 row = [
-                    violation[0], category, violation[1], violation[2], violation[3],
+                    violation[0], category, violation[1], violation[2], line_number, violation[3],
                     initial_commit, ''
                 ] + features + ['False']
                 
@@ -206,16 +209,15 @@ class DataManager:
             
             # 既存の違反を処理
             for row in rows[1:]:
-                violation_id, category, file_path, message, context, error_commit, fix_commit = row[:7]
+                violation_id, category, file_path, message, line_number, context, error_commit, fix_commit = row[:8]
                 fixed = row[-1]  # Fixedは最後の列
-                line_number = row[-2]  # Violation Line Number列
                 
                 # 行番号ベースの違反キーを作成
                 existing_violation_key = (violation_id, file_path, message, line_number)
                 
                 # 既存の違反が現在のコミットで検出されない場合（修正された場合）
                 if existing_violation_key not in current_violations_set and fixed == 'False':
-                    row[6] = current_commit  # Fix Commit Hashを設定
+                    row[7] = current_commit  # Fix Commit Hashを設定
                     row[-1] = 'True'  # FixedをTrueに設定（最後の列）
                 
                 writer.writerow(row)
@@ -229,14 +231,10 @@ class DataManager:
                 else:
                     violation_key = violation
                 
-                # 同じコミット内での重複チェック
-                if violation_key in added_violations:
-                    continue
-                
                 # 既存の行をチェックして、この違反が既に存在するか確認
                 violation_exists = False
                 for row in rows[1:]:
-                    existing_line_number = row[-2]  # Violation Line Number列
+                    existing_line_number = row[4]  # Violation Line Number列（新しい位置）
                     existing_violation_key = (row[0], row[2], row[3], existing_line_number)
                     if violation_key == existing_violation_key:
                         violation_exists = True
@@ -246,9 +244,15 @@ class DataManager:
                     category = self._get_violation_category(violation[0])
                     features = self._extract_features_for_violation(violation, temp_dir)
                     
-                    # 基本情報 + 特徴量
+                    # 行番号を取得
+                    if len(violation) == 5:
+                        line_number = violation[4]
+                    else:
+                        line_number = self._extract_line_number_from_context(violation[3])
+                    
+                    # 基本情報 + 特徴量（行番号をMessageとContextの間に配置）
                     row = [
-                        violation[0], category, violation[1], violation[2], violation[3],
+                        violation[0], category, violation[1], violation[2], line_number, violation[3],
                         current_commit, ''
                     ] + features + ['False']
                     
