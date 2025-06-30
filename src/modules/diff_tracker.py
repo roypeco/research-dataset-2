@@ -213,9 +213,9 @@ class DiffTracker:
                     continue
                 
                 file_path = row[2]  # File Path列
-                current_line_number = row[-2]  # Violation Line Number列（Fixed列の前）
-                error_commit = row[5]  # Error Commit Hash列
-                fix_commit = row[6]  # Fix Commit Hash列
+                current_line_number = row[4]  # Violation Line Number列（新しい位置）
+                error_commit = row[6]  # Error Commit Hash列（新しい位置）
+                fix_commit = row[7]  # Fix Commit Hash列（新しい位置）
                 
                 # 行番号更新の条件を修正
                 # 1. まだ修正されていない違反
@@ -232,7 +232,7 @@ class DiffTracker:
                     if old_line in file_mapping:
                         new_line = file_mapping[old_line]
                         if new_line is not None:
-                            row[-2] = str(new_line)  # Violation Line Numberを更新
+                            row[4] = str(new_line)  # Violation Line Numberを更新（新しい位置）
                             updated_count += 1
                 
                 updated_rows.append(row)
