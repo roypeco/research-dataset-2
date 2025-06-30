@@ -3,12 +3,14 @@ import json
 from pathlib import Path
 import os
 from .feature_extractor import FeatureExtractor
+from .diff_tracker import DiffTracker
 
 class DataManager:
     """データの保存と読み込みを管理するクラス"""
     
     def __init__(self):
         self.feature_extractor = FeatureExtractor()
+        self.diff_tracker = DiffTracker()
     
     def load_repos_from_json(self, json_path):
         """JSONファイルからリポジトリ情報を読み込む"""
@@ -180,18 +182,20 @@ class DataManager:
         return csv_file
     
     def update_fix_history_csv(self, csv_file, current_violations, temp_dir, current_commit):
-        """修正履歴のCSVファイルを更新（特徴量付き）"""
+        """修正履歴のCSVファイルを更新（特徴量付き・行番号追跡付き）"""
+        # まず、前のコミットで発生した違反の行番号を追跡して更新
+        self._update_line_numbers_for_previous_violations(csv_file, temp_dir, current_commit)
+        
         with open(csv_file, 'r') as f:
             reader = csv.reader(f)
             rows = list(reader)
         
-        # 現在の違反をセットに変換（正規化を適用）
+        # 現在の違反をセットに変換（行番号ベースの判定）
         current_violations_set = set()
         for violation in current_violations:
             if len(violation) == 5:
-                # contextを正規化してから比較
-                normalized_context = self._normalize_context(violation[3])
-                violation_key = (violation[0], violation[1], violation[2], normalized_context)
+                # 行番号を含むキーを作成
+                violation_key = (violation[0], violation[1], violation[2], violation[4])  # violation_id, file_path, message, line_number
             else:
                 violation_key = violation
             current_violations_set.add(violation_key)
@@ -204,9 +208,10 @@ class DataManager:
             for row in rows[1:]:
                 violation_id, category, file_path, message, context, error_commit, fix_commit = row[:7]
                 fixed = row[-1]  # Fixedは最後の列
-                # 既存のcontextも正規化して比較
-                normalized_existing_context = self._normalize_context(context)
-                existing_violation_key = (violation_id, file_path, message, normalized_existing_context)
+                line_number = row[-2]  # Violation Line Number列
+                
+                # 行番号ベースの違反キーを作成
+                existing_violation_key = (violation_id, file_path, message, line_number)
                 
                 # 既存の違反が現在のコミットで検出されない場合（修正された場合）
                 if existing_violation_key not in current_violations_set and fixed == 'False':
@@ -218,11 +223,9 @@ class DataManager:
             # 新規違反を追加（重複チェック付き）
             added_violations = set()  # 同じコミット内での重複チェック用
             for violation in current_violations:
-                # 行番号を除いて同一性を判定
+                # 行番号を含む同一性を判定
                 if len(violation) == 5:
-                    # contextを正規化してから比較
-                    normalized_context = self._normalize_context(violation[3])
-                    violation_key = (violation[0], violation[1], violation[2], normalized_context)
+                    violation_key = (violation[0], violation[1], violation[2], violation[4])  # violation_id, file_path, message, line_number
                 else:
                     violation_key = violation
                 
@@ -233,9 +236,8 @@ class DataManager:
                 # 既存の行をチェックして、この違反が既に存在するか確認
                 violation_exists = False
                 for row in rows[1:]:
-                    # 既存のcontextも正規化して比較
-                    normalized_existing_context = self._normalize_context(row[4])
-                    existing_violation_key = (row[0], row[2], row[3], normalized_existing_context)
+                    existing_line_number = row[-2]  # Violation Line Number列
+                    existing_violation_key = (row[0], row[2], row[3], existing_line_number)
                     if violation_key == existing_violation_key:
                         violation_exists = True
                         break
@@ -253,11 +255,32 @@ class DataManager:
                     writer.writerow(row)
                     added_violations.add(violation_key)  # 追加済みとして記録
     
+    def _update_line_numbers_for_previous_violations(self, csv_file, temp_dir, current_commit):
+        """前のコミットで発生した違反の行番号を追跡して更新"""
+        try:
+            # 現在のコミットの前のコミットを取得
+            import subprocess
+            result = subprocess.run([
+                'git', 'log', '--format=%H', '-n', '2', '--skip', '1'
+            ], cwd=temp_dir, capture_output=True, text=True)
+            
+            if result.returncode == 0 and result.stdout.strip():
+                previous_commits = result.stdout.strip().split('\n')
+                if previous_commits:
+                    # 最新の前のコミットを取得
+                    previous_commit = previous_commits[0]
+                    
+                    # 行番号の追跡を実行
+                    updated_count = self.diff_tracker.track_violation_movement(
+                        temp_dir, csv_file, previous_commit
+                    )
+                    
+                    if updated_count > 0:
+                        print(f"Updated {updated_count} violation line numbers from previous commit {previous_commit[:8]}")
+                        
+        except Exception as e:
+            print(f"Error updating line numbers for previous violations: {str(e)}")
+    
     def _check_file_exists(self, file_path):
         """ファイルが存在するか確認（内部メソッド）"""
         return Path(file_path).exists() 
-
-    def _normalize_context(self, context):
-        """コンテキストを正規化する"""
-        # 既存のCSVファイルと同じ正規化を適用
-        return context.strip() 
