@@ -168,7 +168,7 @@ class RepoAnalyzer:
 def main():
     """メイン関数"""
     analyzer = RepoAnalyzer()
-    analyzer.analyze_all_repositories('jsons/test.json')
+    analyzer.analyze_all_repositories('jsons/out.json')
 
 if __name__ == '__main__':
     main() 
