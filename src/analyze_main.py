@@ -14,7 +14,7 @@ class RepoAnalyzer:
         self.data_manager = DataManager()
         self.setup_logging()
         self.START_DATE = '2022-01-01'
-        self.END_DATE = '2022-03-31'
+        self.END_DATE = '2022-01-05'
     
     def setup_logging(self):
         """ログ設定を初期化"""
@@ -75,15 +75,17 @@ class RepoAnalyzer:
                 self.flake8_analyzer.run_flake8(temp_dir), temp_dir
             )
             self.logger.info(f"Found {len(initial_violations)} initial violations for {pkg_name}")
+            
+            # CSVファイルの作成
+            self.logger.info(f"Creating CSV file for: {pkg_name}")
+            csv_file = self.data_manager.create_fix_history_csv(pkg_name, initial_violations, commits[0], temp_dir)
+            self.logger.info(f"CSV file created: {csv_file}")
 
-            # 各コミットで違反の状態を確認（効率化版：メモリ上で蓄積）
+            # 各コミットで違反の状態を確認
             self.logger.info(f"Starting commit-by-commit analysis for {pkg_name}")
             processed_commits = 0
             skipped_commits = 0
             total_commits_to_process = len(commits) - 1
-            
-            # 全コミットの違反データを保存するリスト
-            commits_data = [{'commit': commits[0], 'violations': initial_violations}]
             
             for i, commit in enumerate(commits[1:], 1):  # 最初のコミットは除く
                 progress_percent = (i / total_commits_to_process) * 100
@@ -102,32 +104,14 @@ class RepoAnalyzer:
                 
                 self.logger.info(f"Found {len(current_violations)} violations in commit {commit[:8]}")
                 
-                # 違反データをメモリ上に保存（CSVファイルには書き込まない）
-                commits_data.append({'commit': commit, 'violations': current_violations})
+                # CSVファイルの更新
+                self.data_manager.update_fix_history_csv(csv_file, current_violations, temp_dir, commit)
                 processed_commits += 1
                 
                 # 進捗を定期的にログ出力
                 if i % 10 == 0:
                     progress_percent = (i / total_commits_to_process) * 100
                     self.logger.info(f"Progress: {i}/{total_commits_to_process} commits processed ({progress_percent:.1f}%) for {pkg_name}")
-            
-            # CSVファイルの作成（効率化版：一括書き込み）
-            self.logger.info(f"Creating CSV file with batch processing for: {pkg_name}")
-            result_dir = Path('dataset') / pkg_name
-            result_dir.mkdir(parents=True, exist_ok=True)
-            csv_file = result_dir / 'fix_history.csv'
-            
-            # 全違反データを一括処理してCSV用データを作成
-            violation_rows = self.data_manager.process_violations_batch(
-                initial_violations, commits_data, temp_dir, pkg_name
-            )
-            
-            # CSVファイルに一括書き込み
-            if self.data_manager.write_fix_history_csv_batch(csv_file, violation_rows):
-                self.logger.info(f"CSV file created successfully: {csv_file}")
-            else:
-                self.logger.error(f"Failed to create CSV file: {csv_file}")
-                return False
             
             self.logger.info(f"Analysis completed for {pkg_name}")
             self.logger.info(f"Total commits: {len(commits)}, Processed: {processed_commits}, Skipped: {skipped_commits}")
@@ -147,7 +131,7 @@ class RepoAnalyzer:
         self.logger.info(f"Starting analysis of all repositories from: {json_path}")
         
         repos = self.data_manager.load_repos_from_json(json_path)
-        # self.logger.info(f"Loaded {len(repos)} repositories from JSON file")
+        self.logger.info(f"Loaded {len(repos)} repositories from JSON file")
         
         success_count = 0
         total_count = len([repo for repo in repos if repo['repository_url'] != ""])
@@ -155,14 +139,14 @@ class RepoAnalyzer:
         
         for i, repo in enumerate(repos, 1):
             if repo['repository_url'] == "":
-                # self.logger.info(f"Skipping repository {i} (no URL)")
+                self.logger.info(f"Skipping repository {i} (no URL)")
                 continue
                 
             repo_url = repo['repository_url']
             pkg_name = repo['pkgName']
             
-            # overall_progress_percent = (i / total_count) * 100
-            self.logger.info(f"=== Repository {i}/{total_count}: {pkg_name} ===")
+            overall_progress_percent = (i / total_count) * 100
+            self.logger.info(f"=== Repository {i}/{total_count} ({overall_progress_percent:.1f}%): {pkg_name} ===")
             if self.analyze_repository(repo_url, pkg_name, self.START_DATE, self.END_DATE):
                 success_count += 1
                 self.logger.info(f"✓ Successfully analyzed: {pkg_name}")
