@@ -154,6 +154,106 @@ class DataManager:
         """デフォルトの特徴量値を取得"""
         return [0] * 33  # 33個の特徴量のデフォルト値
     
+    def create_violation_row_data(self, violation, commit_hash, temp_dir, fixed=False, fix_commit=''):
+        """違反情報から1行分のCSVデータを作成（バッファリング用）"""
+        try:
+            category = self._get_violation_category(violation[0])
+            features = self._extract_features_for_violation(violation, temp_dir)
+            
+            # 行番号を取得
+            if len(violation) == 5:
+                line_number = violation[4]
+            else:
+                line_number = self._extract_line_number_from_context(violation[3])
+            
+            # 基本情報 + 特徴量
+            row = [
+                violation[0], category, violation[1], violation[2], line_number, violation[3],
+                commit_hash, fix_commit
+            ] + features + [str(fixed)]
+            
+            return row
+            
+        except Exception as e:
+            print(f"Error creating violation row data: {str(e)}")
+            return None
+
+    def write_fix_history_csv_batch(self, csv_file, violation_rows):
+        """違反データのリストを一括でCSVに書き込み（効率化版）"""
+        try:
+            with open(csv_file, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow(self._get_feature_headers())
+                
+                # 違反データを一括書き込み
+                for row in violation_rows:
+                    if row:  # Noneチェック
+                        writer.writerow(row)
+                        
+            return True
+            
+        except Exception as e:
+            print(f"Error writing CSV batch: {str(e)}")
+            return False
+
+    def process_violations_batch(self, initial_violations, commits_data, temp_dir, pkg_name):
+        """違反データを一括処理してCSVデータのリストを作成"""
+        violation_rows = []
+        violation_tracker = {}  # 違反追跡用: key=(violation_id, file_path, message, line_number), value=row_index
+        
+        # 初期違反を処理
+        for violation in initial_violations:
+            row = self.create_violation_row_data(violation, commits_data[0]['commit'], temp_dir, fixed=False)
+            if row:
+                violation_rows.append(row)
+                # 追跡用キーを作成
+                if len(violation) == 5:
+                    violation_key = (violation[0], violation[1], violation[2], violation[4])
+                else:
+                    line_number = self._extract_line_number_from_context(violation[3])
+                    violation_key = (violation[0], violation[1], violation[2], line_number)
+                violation_tracker[violation_key] = len(violation_rows) - 1
+        
+        # 各コミットの違反を処理
+        for commit_data in commits_data[1:]:
+            commit_hash = commit_data['commit']
+            current_violations = commit_data['violations']
+            
+            # 現在の違反をセットに変換
+            current_violations_set = set()
+            for violation in current_violations:
+                if len(violation) == 5:
+                    violation_key = (violation[0], violation[1], violation[2], violation[4])
+                else:
+                    line_number = self._extract_line_number_from_context(violation[3])
+                    violation_key = (violation[0], violation[1], violation[2], line_number)
+                current_violations_set.add(violation_key)
+            
+            # 既存の違反で修正されたものをチェック
+            for violation_key, row_index in violation_tracker.items():
+                if violation_key not in current_violations_set:
+                    # 違反が修正された
+                    if violation_rows[row_index][-1] == 'False':  # まだ修正されていない場合
+                        violation_rows[row_index][7] = commit_hash  # Fix Commit Hash
+                        violation_rows[row_index][-1] = 'True'  # Fixed
+            
+            # 新規違反を追加
+            for violation in current_violations:
+                if len(violation) == 5:
+                    violation_key = (violation[0], violation[1], violation[2], violation[4])
+                else:
+                    line_number = self._extract_line_number_from_context(violation[3])
+                    violation_key = (violation[0], violation[1], violation[2], line_number)
+                
+                if violation_key not in violation_tracker:
+                    # 新規違反
+                    row = self.create_violation_row_data(violation, commit_hash, temp_dir, fixed=False)
+                    if row:
+                        violation_rows.append(row)
+                        violation_tracker[violation_key] = len(violation_rows) - 1
+        
+        return violation_rows
+    
     def create_fix_history_csv(self, pkg_name, initial_violations, initial_commit, temp_dir):
         """修正履歴のCSVファイルを作成（特徴量付き）"""
         result_dir = Path('dataset') / pkg_name
