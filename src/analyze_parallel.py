@@ -15,7 +15,7 @@ class ParallelRepoAnalyzer:
         self.max_workers = max_workers or min(cpu_count(), 8)  # CPUコア数または8の小さい方
         self.setup_logging()
         self.START_DATE = '2022-01-01'
-        self.END_DATE = '2022-03-31'
+        self.END_DATE = '2024-12-31'
     
     def setup_logging(self):
         """ログ設定を初期化（全体ログのみ）"""
@@ -264,7 +264,7 @@ class ParallelRepoAnalyzer:
 def main():
     """メイン関数"""
     analyzer = ParallelRepoAnalyzer()
-    result = analyzer.analyze_all_repositories_parallel('jsons/test.json')
+    result = analyzer.analyze_all_repositories_parallel('jsons/out.json')
     
     print(f"\n=== Final Summary ===")
     print(f"Total repositories: {result['total_count']}")
