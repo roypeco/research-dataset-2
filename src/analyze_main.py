@@ -8,13 +8,14 @@ from modules.data_manager import DataManager
 class RepoAnalyzer:
     """リポジトリ分析のメインクラス"""
     
-    def __init__(self):
+    def __init__(self, output_format='csv'):
         self.repo_manager = RepositoryManager()
         self.flake8_analyzer = Flake8Analyzer()
         self.data_manager = DataManager()
         self.setup_logging()
         self.START_DATE = '2022-01-01'
         self.END_DATE = '2024-12-31'
+        self.output_format = output_format.lower()  # 'csv' or 'parquet'
     
     def setup_logging(self):
         """ログ設定を初期化"""
@@ -75,15 +76,19 @@ class RepoAnalyzer:
                 self.flake8_analyzer.run_flake8(temp_dir), temp_dir
             )
             self.logger.info(f"Found {len(initial_violations)} initial violations for {pkg_name}")
+            
+            # DataFrameの初期化
+            self.logger.info(f"Initializing DataFrame for: {pkg_name}")
+            if not self.data_manager.initialize_fix_history_dataframe(initial_violations, commits[0], temp_dir):
+                self.logger.error(f"Failed to initialize DataFrame for: {pkg_name}")
+                return False
+            self.logger.info(f"DataFrame initialized for: {pkg_name}")
 
-            # 各コミットで違反の状態を確認（効率化版：メモリ上で蓄積）
+            # 各コミットで違反の状態を確認
             self.logger.info(f"Starting commit-by-commit analysis for {pkg_name}")
             processed_commits = 0
             skipped_commits = 0
             total_commits_to_process = len(commits) - 1
-            
-            # 全コミットの違反データを保存するリスト
-            commits_data = [{'commit': commits[0], 'violations': initial_violations}]
             
             for i, commit in enumerate(commits[1:], 1):  # 最初のコミットは除く
                 progress_percent = (i / total_commits_to_process) * 100
@@ -102,8 +107,10 @@ class RepoAnalyzer:
                 
                 self.logger.info(f"Found {len(current_violations)} violations in commit {commit[:8]}")
                 
-                # 違反データをメモリ上に保存（CSVファイルには書き込まない）
-                commits_data.append({'commit': commit, 'violations': current_violations})
+                # DataFrameの更新
+                if not self.data_manager.update_fix_history_dataframe(current_violations, temp_dir, commit):
+                    self.logger.warning(f"Failed to update DataFrame for commit {commit[:8]}")
+                
                 processed_commits += 1
                 
                 # 進捗を定期的にログ出力
@@ -111,23 +118,18 @@ class RepoAnalyzer:
                     progress_percent = (i / total_commits_to_process) * 100
                     self.logger.info(f"Progress: {i}/{total_commits_to_process} commits processed ({progress_percent:.1f}%) for {pkg_name}")
             
-            # CSVファイルの作成（効率化版：一括書き込み）
-            self.logger.info(f"Creating CSV file with batch processing for: {pkg_name}")
-            result_dir = Path('dataset') / pkg_name
-            result_dir.mkdir(parents=True, exist_ok=True)
-            csv_file = result_dir / 'fix_history.csv'
+            # DataFrameをファイルに保存
+            self.logger.info(f"Saving DataFrame to {self.output_format.upper()} for: {pkg_name}")
             
-            # 全違反データを一括処理してCSV用データを作成
-            violation_rows = self.data_manager.process_violations_batch(
-                initial_violations, commits_data, temp_dir, pkg_name
-            )
+            if self.output_format == 'parquet':
+                output_file = self.data_manager.save_fix_history_to_parquet(pkg_name)
+            else:  # デフォルトはCSV
+                output_file = self.data_manager.save_fix_history_to_csv(pkg_name)
             
-            # CSVファイルに一括書き込み
-            if self.data_manager.write_fix_history_csv_batch(csv_file, violation_rows):
-                self.logger.info(f"CSV file created successfully: {csv_file}")
+            if output_file:
+                self.logger.info(f"{self.output_format.upper()} file saved: {output_file}")
             else:
-                self.logger.error(f"Failed to create CSV file: {csv_file}")
-                return False
+                self.logger.error(f"Failed to save {self.output_format.upper()} file for: {pkg_name}")
             
             self.logger.info(f"Analysis completed for {pkg_name}")
             self.logger.info(f"Total commits: {len(commits)}, Processed: {processed_commits}, Skipped: {skipped_commits}")
@@ -147,7 +149,7 @@ class RepoAnalyzer:
         self.logger.info(f"Starting analysis of all repositories from: {json_path}")
         
         repos = self.data_manager.load_repos_from_json(json_path)
-        # self.logger.info(f"Loaded {len(repos)} repositories from JSON file")
+        self.logger.info(f"Loaded {len(repos)} repositories from JSON file")
         
         success_count = 0
         total_count = len([repo for repo in repos if repo['repository_url'] != ""])
@@ -155,14 +157,14 @@ class RepoAnalyzer:
         
         for i, repo in enumerate(repos, 1):
             if repo['repository_url'] == "":
-                # self.logger.info(f"Skipping repository {i} (no URL)")
+                self.logger.info(f"Skipping repository {i} (no URL)")
                 continue
                 
             repo_url = repo['repository_url']
             pkg_name = repo['pkgName']
             
-            # overall_progress_percent = (i / total_count) * 100
-            self.logger.info(f"=== Repository {i}/{total_count}: {pkg_name} ===")
+            overall_progress_percent = (i / total_count) * 100
+            self.logger.info(f"=== Repository {i}/{total_count} ({overall_progress_percent:.1f}%): {pkg_name} ===")
             if self.analyze_repository(repo_url, pkg_name, self.START_DATE, self.END_DATE):
                 success_count += 1
                 self.logger.info(f"✓ Successfully analyzed: {pkg_name}")
@@ -183,7 +185,20 @@ class RepoAnalyzer:
 
 def main():
     """メイン関数"""
-    analyzer = RepoAnalyzer()
+    import sys
+    
+    # コマンドライン引数からoutput_formatを取得
+    output_format = 'csv'  # デフォルト
+    if len(sys.argv) > 1:
+        if sys.argv[1].lower() in ['csv', 'parquet']:
+            output_format = sys.argv[1].lower()
+        else:
+            print("Usage: python analyze_main.py [csv|parquet]")
+            print("Default: csv")
+    
+    print(f"Output format: {output_format.upper()}")
+    
+    analyzer = RepoAnalyzer(output_format=output_format)
     analyzer.analyze_all_repositories('jsons/out.json')
 
 if __name__ == '__main__':

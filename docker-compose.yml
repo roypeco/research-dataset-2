@@ -1,5 +1,6 @@
 services:
   analyzer:
+    container_name: dataset-kameoka
     build: .
     volumes:
       - ./:/app

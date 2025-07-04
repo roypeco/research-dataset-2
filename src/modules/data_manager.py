@@ -2,8 +2,11 @@ import csv
 import json
 from pathlib import Path
 import os
+import pandas as pd
 from .feature_extractor import FeatureExtractor
 from .diff_tracker import DiffTracker
+from .csv_exporter import CSVExporter
+from .parquet_exporter import ParquetExporter
 
 class DataManager:
     """データの保存と読み込みを管理するクラス"""
@@ -11,6 +14,11 @@ class DataManager:
     def __init__(self):
         self.feature_extractor = FeatureExtractor()
         self.diff_tracker = DiffTracker()
+        # DataFrame for storing fix history in memory
+        self.fix_history_df = None
+        # Exporterインスタンスを初期化
+        self.csv_exporter = CSVExporter(self)
+        self.parquet_exporter = ParquetExporter(self)
     
     def load_repos_from_json(self, json_path):
         """JSONファイルからリポジトリ情報を読み込む"""
@@ -154,6 +162,53 @@ class DataManager:
         """デフォルトの特徴量値を取得"""
         return [0] * 33  # 33個の特徴量のデフォルト値
     
+    def optimize_dataframe_types(self, df):
+        """DataFrameのデータ型を最適化してファイルサイズを削減（共通メソッド）"""
+        # 数値型の最適化
+        numeric_columns = [
+            'File Size', 'Total Lines', 'Code Lines', 'Comment Lines', 'Blank Lines',
+            'File Depth', 'Filename Length', 'Line Length', 'Line Length No Whitespace',
+            'Indent Level', 'Line Complexity', 'Special Chars', 'Variable Count',
+            'Function Calls', 'Operators', 'Function Params', 'Function Lines',
+            'Function Complexity', 'Class Methods', 'Class Lines', 'Total Functions',
+            'Total Classes', 'Total Imports', 'Total Variables', 'Cyclomatic Complexity',
+            'File Change Frequency', 'Lines Added Past 25 Revisions', 'Lines Added Past 3 Months'
+        ]
+        
+        for col in numeric_columns:
+            if col in df.columns:
+                # 整数型の最適化
+                if df[col].dtype in ['int64', 'int32']:
+                    df[col] = pd.to_numeric(df[col], downcast='integer')
+                # 浮動小数点型の最適化
+                elif df[col].dtype in ['float64', 'float32']:
+                    df[col] = pd.to_numeric(df[col], downcast='float')
+        
+        # ブール型の最適化
+        boolean_columns = ['In Function', 'In Class', 'Fixed']
+        for col in boolean_columns:
+            if col in df.columns:
+                # 'True'/'False'文字列をブール型に変換
+                if df[col].dtype == 'object':
+                    df[col] = df[col].map({'True': True, 'False': False, True: True, False: False})
+                df[col] = df[col].astype('bool')
+        
+        # 行番号を整数型に変換
+        if 'Violation Line Number' in df.columns:
+            try:
+                df['Violation Line Number'] = pd.to_numeric(df['Violation Line Number'], errors='coerce')
+                df['Violation Line Number'] = df['Violation Line Number'].astype('Int64')  # nullable integer
+            except:
+                pass
+        
+        # カテゴリ型の最適化（重複の多い文字列列）
+        category_columns = ['Violation ID', 'Category', 'File Extension']
+        for col in category_columns:
+            if col in df.columns and df[col].dtype == 'object':
+                df[col] = df[col].astype('category')
+        
+        return df
+    
     def create_violation_row_data(self, violation, commit_hash, temp_dir, fixed=False, fix_commit=''):
         """違反情報から1行分のCSVデータを作成（バッファリング用）"""
         try:
@@ -180,21 +235,7 @@ class DataManager:
 
     def write_fix_history_csv_batch(self, csv_file, violation_rows):
         """違反データのリストを一括でCSVに書き込み（効率化版）"""
-        try:
-            with open(csv_file, 'w', newline='', encoding='utf-8') as f:
-                writer = csv.writer(f)
-                writer.writerow(self._get_feature_headers())
-                
-                # 違反データを一括書き込み
-                for row in violation_rows:
-                    if row:  # Noneチェック
-                        writer.writerow(row)
-                        
-            return True
-            
-        except Exception as e:
-            print(f"Error writing CSV batch: {str(e)}")
-            return False
+        return self.csv_exporter.write_fix_history_csv_batch(csv_file, violation_rows)
 
     def process_violations_batch(self, initial_violations, commits_data, temp_dir, pkg_name):
         """違反データを一括処理してCSVデータのリストを作成"""
@@ -256,15 +297,121 @@ class DataManager:
     
     def create_fix_history_csv(self, pkg_name, initial_violations, initial_commit, temp_dir):
         """修正履歴のCSVファイルを作成（特徴量付き）"""
-        result_dir = Path('dataset') / pkg_name
-        result_dir.mkdir(parents=True, exist_ok=True)
+        return self.csv_exporter.create_fix_history_csv(pkg_name, initial_violations, initial_commit, temp_dir)
+    
+    def update_fix_history_csv(self, csv_file, current_violations, temp_dir, current_commit):
+        """修正履歴のCSVファイルを更新（特徴量付き・行番号追跡付き）"""
+        return self.csv_exporter.update_fix_history_csv(csv_file, current_violations, temp_dir, current_commit)
+    
+    def _check_file_exists(self, file_path):
+        """ファイルが存在するか確認（内部メソッド）"""
+        return Path(file_path).exists()
+
+    def initialize_fix_history_dataframe(self, initial_violations, initial_commit, temp_dir):
+        """修正履歴のDataFrameを初期化"""
+        rows = []
         
-        csv_file = result_dir / 'fix_history.csv'
-        with open(csv_file, 'w', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow(self._get_feature_headers())
+        for violation in initial_violations:
+            category = self._get_violation_category(violation[0])
+            features = self._extract_features_for_violation(violation, temp_dir)
             
-            for violation in initial_violations:
+            # 行番号を取得
+            if len(violation) == 5:
+                line_number = violation[4]
+            else:
+                line_number = self._extract_line_number_from_context(violation[3])
+            
+            # 基本情報 + 特徴量
+            row_data = {
+                'Violation ID': violation[0],
+                'Category': category,
+                'File Path': violation[1],
+                'Message': violation[2],
+                'Violation Line Number': line_number,
+                'Context': violation[3],
+                'Error Commit Hash': initial_commit,
+                'Fix Commit Hash': ''
+            }
+            
+            # 特徴量を追加
+            feature_names = [
+                'File Size', 'Total Lines', 'Code Lines', 'Comment Lines', 'Blank Lines',
+                'File Depth', 'File Extension', 'Filename Length',
+                'Line Length', 'Line Length No Whitespace', 'Indent Level', 'Line Complexity',
+                'Special Chars', 'Variable Count', 'Function Calls', 'Operators',
+                'In Function', 'Function Name', 'Function Params', 'Function Lines', 'Function Complexity',
+                'In Class', 'Class Name', 'Class Methods', 'Class Lines',
+                'Total Functions', 'Total Classes', 'Total Imports', 'Total Variables',
+                'Cyclomatic Complexity', 'File Change Frequency',
+                'Lines Added Past 25 Revisions', 'Lines Added Past 3 Months'
+            ]
+            
+            for i, feature_name in enumerate(feature_names):
+                row_data[feature_name] = features[i] if i < len(features) else 0
+            
+            row_data['Fixed'] = False
+            rows.append(row_data)
+        
+        self.fix_history_df = pd.DataFrame(rows)
+        return True
+    
+    def update_fix_history_dataframe(self, current_violations, temp_dir, current_commit):
+        """修正履歴のDataFrameを更新"""
+        if self.fix_history_df is None:
+            return False
+        
+        # 前のコミットで発生した違反の行番号を追跡して更新
+        self._update_dataframe_line_numbers_for_previous_violations(temp_dir, current_commit)
+        
+        # 現在の違反をセットに変換
+        current_violations_set = set()
+        for violation in current_violations:
+            if len(violation) == 5:
+                violation_key = (violation[0], violation[1], violation[2], violation[4])
+            else:
+                line_number = self._extract_line_number_from_context(violation[3])
+                violation_key = (violation[0], violation[1], violation[2], line_number)
+            current_violations_set.add(violation_key)
+        
+        # 既存の違反で修正されたものをチェック
+        for index, row in self.fix_history_df.iterrows():
+            if not row['Fixed']:  # まだ修正されていない場合
+                existing_violation_key = (
+                    row['Violation ID'], 
+                    row['File Path'], 
+                    row['Message'], 
+                    row['Violation Line Number']
+                )
+                
+                if existing_violation_key not in current_violations_set:
+                    # 違反が修正された
+                    self.fix_history_df.loc[index, 'Fix Commit Hash'] = current_commit
+                    self.fix_history_df.loc[index, 'Fixed'] = True
+        
+        # 新規違反を追加
+        new_rows = []
+        for violation in current_violations:
+            if len(violation) == 5:
+                violation_key = (violation[0], violation[1], violation[2], violation[4])
+            else:
+                line_number = self._extract_line_number_from_context(violation[3])
+                violation_key = (violation[0], violation[1], violation[2], line_number)
+            
+            # 既存の違反かチェック
+            existing_violation = False
+            for _, row in self.fix_history_df.iterrows():
+                existing_key = (
+                    row['Violation ID'], 
+                    row['File Path'], 
+                    row['Message'], 
+                    row['Violation Line Number']
+                )
+                if violation_key == existing_key:
+                    existing_violation = True
+                    break
+            
+            if not existing_violation:
+                # 新規違反
                 category = self._get_violation_category(violation[0])
                 features = self._extract_features_for_violation(violation, temp_dir)
                 
@@ -274,93 +421,69 @@ class DataManager:
                 else:
                     line_number = self._extract_line_number_from_context(violation[3])
                 
-                # 基本情報 + 特徴量（行番号をMessageとContextの間に配置）
-                row = [
-                    violation[0], category, violation[1], violation[2], line_number, violation[3],
-                    initial_commit, ''
-                ] + features + ['False']
+                row_data = {
+                    'Violation ID': violation[0],
+                    'Category': category,
+                    'File Path': violation[1],
+                    'Message': violation[2],
+                    'Violation Line Number': line_number,
+                    'Context': violation[3],
+                    'Error Commit Hash': current_commit,
+                    'Fix Commit Hash': ''
+                }
                 
-                writer.writerow(row)
+                # 特徴量を追加
+                feature_names = [
+                    'File Size', 'Total Lines', 'Code Lines', 'Comment Lines', 'Blank Lines',
+                    'File Depth', 'File Extension', 'Filename Length',
+                    'Line Length', 'Line Length No Whitespace', 'Indent Level', 'Line Complexity',
+                    'Special Chars', 'Variable Count', 'Function Calls', 'Operators',
+                    'In Function', 'Function Name', 'Function Params', 'Function Lines', 'Function Complexity',
+                    'In Class', 'Class Name', 'Class Methods', 'Class Lines',
+                    'Total Functions', 'Total Classes', 'Total Imports', 'Total Variables',
+                    'Cyclomatic Complexity', 'File Change Frequency',
+                    'Lines Added Past 25 Revisions', 'Lines Added Past 3 Months'
+                ]
+                
+                for i, feature_name in enumerate(feature_names):
+                    row_data[feature_name] = features[i] if i < len(features) else 0
+                
+                row_data['Fixed'] = False
+                new_rows.append(row_data)
+        
+        # 新規違反をDataFrameに追加
+        if new_rows:
+            new_df = pd.DataFrame(new_rows)
+            self.fix_history_df = pd.concat([self.fix_history_df, new_df], ignore_index=True)
+        
+        return True
+    
+    def save_fix_history_to_csv(self, pkg_name):
+        """DataFrameをCSVファイルに保存"""
+        if self.fix_history_df is None:
+            return None
+        
+        csv_file = self.csv_exporter.save_fix_history_to_csv(pkg_name, self.fix_history_df)
+        
+        # DataFrameをクリア
+        self.fix_history_df = None
         
         return csv_file
     
-    def update_fix_history_csv(self, csv_file, current_violations, temp_dir, current_commit):
-        """修正履歴のCSVファイルを更新（特徴量付き・行番号追跡付き）"""
-        # まず、前のコミットで発生した違反の行番号を追跡して更新
-        self._update_line_numbers_for_previous_violations(csv_file, temp_dir, current_commit)
+    def save_fix_history_to_parquet(self, pkg_name):
+        """DataFrameをParquetファイルに保存"""
+        if self.fix_history_df is None:
+            return None
         
-        with open(csv_file, 'r') as f:
-            reader = csv.reader(f)
-            rows = list(reader)
+        parquet_file = self.parquet_exporter.save_fix_history_to_parquet(pkg_name, self.fix_history_df)
         
-        # 現在の違反をセットに変換（行番号ベースの判定）
-        current_violations_set = set()
-        for violation in current_violations:
-            if len(violation) == 5:
-                # 行番号を含むキーを作成
-                violation_key = (violation[0], violation[1], violation[2], violation[4])  # violation_id, file_path, message, line_number
-            else:
-                violation_key = violation
-            current_violations_set.add(violation_key)
+        # DataFrameをクリア
+        self.fix_history_df = None
         
-        with open(csv_file, 'w', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow(self._get_feature_headers())  # 新しいヘッダーを使用
-            
-            # 既存の違反を処理
-            for row in rows[1:]:
-                violation_id, category, file_path, message, line_number, context, error_commit, fix_commit = row[:8]
-                fixed = row[-1]  # Fixedは最後の列
-                
-                # 行番号ベースの違反キーを作成
-                existing_violation_key = (violation_id, file_path, message, line_number)
-                
-                # 既存の違反が現在のコミットで検出されない場合（修正された場合）
-                if existing_violation_key not in current_violations_set and fixed == 'False':
-                    row[7] = current_commit  # Fix Commit Hashを設定
-                    row[-1] = 'True'  # FixedをTrueに設定（最後の列）
-                
-                writer.writerow(row)
-            
-            # 新規違反を追加（重複チェック付き）
-            added_violations = set()  # 同じコミット内での重複チェック用
-            for violation in current_violations:
-                # 行番号を含む同一性を判定
-                if len(violation) == 5:
-                    violation_key = (violation[0], violation[1], violation[2], violation[4])  # violation_id, file_path, message, line_number
-                else:
-                    violation_key = violation
-                
-                # 既存の行をチェックして、この違反が既に存在するか確認
-                violation_exists = False
-                for row in rows[1:]:
-                    existing_line_number = row[4]  # Violation Line Number列（新しい位置）
-                    existing_violation_key = (row[0], row[2], row[3], existing_line_number)
-                    if violation_key == existing_violation_key:
-                        violation_exists = True
-                        break
-                
-                if not violation_exists:
-                    category = self._get_violation_category(violation[0])
-                    features = self._extract_features_for_violation(violation, temp_dir)
-                    
-                    # 行番号を取得
-                    if len(violation) == 5:
-                        line_number = violation[4]
-                    else:
-                        line_number = self._extract_line_number_from_context(violation[3])
-                    
-                    # 基本情報 + 特徴量（行番号をMessageとContextの間に配置）
-                    row = [
-                        violation[0], category, violation[1], violation[2], line_number, violation[3],
-                        current_commit, ''
-                    ] + features + ['False']
-                    
-                    writer.writerow(row)
-                    added_violations.add(violation_key)  # 追加済みとして記録
+        return parquet_file
     
-    def _update_line_numbers_for_previous_violations(self, csv_file, temp_dir, current_commit):
-        """前のコミットで発生した違反の行番号を追跡して更新"""
+    def _update_dataframe_line_numbers_for_previous_violations(self, temp_dir, current_commit):
+        """前のコミットで発生した違反の行番号を追跡してDataFrameを更新"""
         try:
             # 現在のコミットの前のコミットを取得
             import subprocess
@@ -375,8 +498,8 @@ class DataManager:
                     previous_commit = previous_commits[0]
                     
                     # 行番号の追跡を実行
-                    updated_count = self.diff_tracker.track_violation_movement(
-                        temp_dir, csv_file, previous_commit
+                    updated_count = self._track_violation_movement_dataframe(
+                        temp_dir, previous_commit
                     )
                     
                     if updated_count > 0:
@@ -385,6 +508,47 @@ class DataManager:
         except Exception as e:
             print(f"Error updating line numbers for previous violations: {str(e)}")
     
-    def _check_file_exists(self, file_path):
-        """ファイルが存在するか確認（内部メソッド）"""
-        return Path(file_path).exists() 
+    def _track_violation_movement_dataframe(self, repo_path, commit_hash):
+        """違反の移動を追跡してDataFrameを更新"""
+        print(f"Tracking violation movement for commit {commit_hash}")
+        
+        # 行番号マッピングを計算
+        line_mappings = self.diff_tracker.calculate_line_mapping(repo_path, commit_hash)
+        
+        if not line_mappings:
+            print(f"No line mappings found for commit {commit_hash}")
+            return 0
+        
+        # DataFrameの行番号を更新
+        updated_count = self._update_dataframe_violation_line_numbers(line_mappings, commit_hash)
+        
+        print(f"Updated {updated_count} violation line numbers for commit {commit_hash}")
+        return updated_count
+    
+    def _update_dataframe_violation_line_numbers(self, line_mappings, commit_hash):
+        """DataFrameの違反行番号を更新"""
+        updated_count = 0
+        
+        for index, row in self.fix_history_df.iterrows():
+            file_path = row['File Path']
+            current_line_number = row['Violation Line Number']
+            fix_commit = row['Fix Commit Hash']
+            
+            # 行番号更新の条件
+            # 1. まだ修正されていない違反
+            # 2. ファイルに変更がある
+            # 3. 有効な行番号
+            if (fix_commit == '' and 
+                file_path in line_mappings and
+                str(current_line_number).isdigit()):
+                
+                old_line = int(current_line_number)
+                file_mapping = line_mappings[file_path]
+                
+                if old_line in file_mapping:
+                    new_line = file_mapping[old_line]
+                    if new_line is not None:
+                        self.fix_history_df.loc[index, 'Violation Line Number'] = str(new_line)
+                        updated_count += 1
+        
+        return updated_count 

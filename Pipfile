@@ -5,6 +5,8 @@ name = "pypi"
 
 [packages]
 flake8 = "*"
+pandas = "*"
+pyarrow = "*"
 
 [dev-packages]
 
@@ -14,3 +16,4 @@ python_full_version = "3.13.3"
 
 [scripts]
 dataset = "python src/analyze_repos.py"
+view_parquet = "python src/read_parquet.py"

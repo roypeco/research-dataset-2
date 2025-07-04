@@ -11,8 +11,9 @@ import time
 class ParallelRepoAnalyzer:
     """プロジェクトごとに並列処理するリポジトリ分析クラス"""
     
-    def __init__(self, max_workers=4):
+    def __init__(self, max_workers=4, output_format='csv'):
         self.max_workers = max_workers or min(cpu_count(), 8)  # CPUコア数または8の小さい方
+        self.output_format = output_format.lower()  # 'csv' or 'parquet'
         self.setup_logging()
         self.START_DATE = '2022-01-01'
         self.END_DATE = '2024-12-31'
@@ -62,6 +63,7 @@ class ParallelRepoAnalyzer:
         """単一のリポジトリを分析する（並列処理用ワーカー）"""
         repo_url = repo_data['repository_url']
         pkg_name = repo_data['pkgName']
+        output_format = repo_data['output_format']  # 出力フォーマット情報を取得
         temp_dir = os.path.abspath(f"temp_{pkg_name}_{os.getpid()}")  # プロセスIDを追加して競合回避
         
         # プロジェクト専用ロガーを設定
@@ -113,17 +115,21 @@ class ParallelRepoAnalyzer:
                 flake8_analyzer.run_flake8(temp_dir), temp_dir
             )
             project_logger.info(f"Found {len(initial_violations)} initial violations for {pkg_name}")
+            
+            # DataFrameの初期化
+            project_logger.info(f"Initializing DataFrame for: {pkg_name}")
+            if not data_manager.initialize_fix_history_dataframe(initial_violations, commits[0], temp_dir):
+                project_logger.error(f"Failed to initialize DataFrame for: {pkg_name}")
+                return {'pkg_name': pkg_name, 'success': False, 'error': 'DataFrame initialization failed'}
+            project_logger.info(f"DataFrame initialized for: {pkg_name}")
 
-            # 各コミットで違反の状態を確認（逐次処理）
+            # 各コミットで違反の状態を確認
             project_logger.info(f"Starting commit-by-commit analysis for {pkg_name}")
             processed_commits = 0
             skipped_commits = 0
             total_commits_to_process = len(commits) - 1
             
-            # 全コミットの違反データを保存するリスト
-            commits_data = [{'commit': commits[0], 'violations': initial_violations}]
-            
-            for i, commit in enumerate(commits[1:], 1):
+            for i, commit in enumerate(commits[1:], 1):  # 最初のコミットは除く
                 progress_percent = (i / total_commits_to_process) * 100
                 project_logger.info(f"Processing commit {i}/{total_commits_to_process} ({progress_percent:.1f}%): {commit[:8]} for {pkg_name}")
                 
@@ -137,10 +143,13 @@ class ParallelRepoAnalyzer:
                 current_violations = flake8_analyzer.parse_flake8_output(
                     flake8_analyzer.run_flake8(temp_dir), temp_dir
                 )
+                
                 project_logger.info(f"Found {len(current_violations)} violations in commit {commit[:8]}")
                 
-                # 違反データをメモリ上に保存
-                commits_data.append({'commit': commit, 'violations': current_violations})
+                # DataFrameの更新
+                if not data_manager.update_fix_history_dataframe(current_violations, temp_dir, commit):
+                    project_logger.warning(f"Failed to update DataFrame for commit {commit[:8]}")
+                
                 processed_commits += 1
                 
                 # 進捗を定期的にログ出力
@@ -148,27 +157,24 @@ class ParallelRepoAnalyzer:
                     progress_percent = (i / total_commits_to_process) * 100
                     project_logger.info(f"Progress: {i}/{total_commits_to_process} commits processed ({progress_percent:.1f}%) for {pkg_name}")
             
-            # CSVファイルの作成（効率化版：一括書き込み）
-            project_logger.info(f"Creating CSV file with batch processing for: {pkg_name}")
-            result_dir = Path('dataset') / pkg_name
-            result_dir.mkdir(parents=True, exist_ok=True)
-            csv_file = result_dir / 'fix_history.csv'
+            # DataFrameをファイルに保存
+            project_logger.info(f"Saving DataFrame to {output_format.upper()} for: {pkg_name}")
             
-            # 全違反データを一括処理してCSV用データを作成
-            violation_rows = data_manager.process_violations_batch(
-                initial_violations, commits_data, temp_dir, pkg_name
-            )
+            if output_format == 'parquet':
+                output_file = data_manager.save_fix_history_to_parquet(pkg_name)
+            else:  # デフォルトはCSV
+                output_file = data_manager.save_fix_history_to_csv(pkg_name)
             
-            # CSVファイルに一括書き込み
-            if not data_manager.write_fix_history_csv_batch(csv_file, violation_rows):
-                project_logger.error(f"Failed to create CSV file: {csv_file}")
-                return {'pkg_name': pkg_name, 'success': False, 'error': 'CSV write failed'}
-            project_logger.info(f"CSV file created successfully: {csv_file}")
+            if output_file:
+                project_logger.info(f"{output_format.upper()} file saved: {output_file}")
+                total_violations = len(data_manager.fix_history_df) if hasattr(data_manager, 'fix_history_df') else 0
+            else:
+                project_logger.error(f"Failed to save {output_format.upper()} file for: {pkg_name}")
+                return {'pkg_name': pkg_name, 'success': False, 'error': f'{output_format.upper()} save failed'}
             
             project_logger.info(f"Analysis completed for {pkg_name}")
             project_logger.info(f"Total commits: {len(commits)}, Processed: {processed_commits}, Skipped: {skipped_commits}")
             project_logger.info(f"Processing rate: {processed_commits}/{total_commits_to_process} ({processed_commits/total_commits_to_process*100:.1f}%)")
-            project_logger.info(f"Total violations recorded: {len(violation_rows)}")
             
             return {
                 'pkg_name': pkg_name,
@@ -176,7 +182,7 @@ class ParallelRepoAnalyzer:
                 'total_commits': len(commits),
                 'processed_commits': processed_commits,
                 'skipped_commits': skipped_commits,
-                'total_violations': len(violation_rows)
+                'total_violations': total_violations
             }
             
         except Exception as e:
@@ -202,6 +208,10 @@ class ParallelRepoAnalyzer:
         valid_repos = [repo for repo in repos if repo['repository_url'] != ""]
         
         self.logger.info(f"Loaded {len(repos)} repositories, {len(valid_repos)} valid repositories")
+        
+        # 各リポジトリに出力フォーマット情報を追加
+        for repo in valid_repos:
+            repo['output_format'] = self.output_format
         
         start_time = time.time()
         success_count = 0
@@ -263,7 +273,20 @@ class ParallelRepoAnalyzer:
 
 def main():
     """メイン関数"""
-    analyzer = ParallelRepoAnalyzer()
+    import sys
+    
+    # コマンドライン引数からoutput_formatを取得
+    output_format = 'csv'  # デフォルト
+    if len(sys.argv) > 1:
+        if sys.argv[1].lower() in ['csv', 'parquet']:
+            output_format = sys.argv[1].lower()
+        else:
+            print("Usage: python analyze_parallel.py [csv|parquet]")
+            print("Default: csv")
+    
+    print(f"Output format: {output_format.upper()}")
+    
+    analyzer = ParallelRepoAnalyzer(output_format=output_format)
     result = analyzer.analyze_all_repositories_parallel('jsons/out.json')
     
     print(f"\n=== Final Summary ===")
