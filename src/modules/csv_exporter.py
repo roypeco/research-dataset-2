@@ -54,7 +54,7 @@ class CSVExporter:
         for violation in current_violations:
             if len(violation) == 5:
                 # 行番号を含むキーを作成
-                violation_key = (violation[0], violation[1], violation[2], violation[4])  # violation_id, file_path, message, line_number
+                violation_key = (violation[0], violation[1], violation[4])  # violation_id, file_path, line_number
             else:
                 violation_key = violation
             current_violations_set.add(violation_key)
@@ -69,7 +69,7 @@ class CSVExporter:
                 fixed = row[-1]  # Fixedは最後の列
                 
                 # 行番号ベースの違反キーを作成
-                existing_violation_key = (violation_id, file_path, message, line_number)
+                existing_violation_key = (violation_id, file_path, line_number)
                 
                 # 既存の違反が現在のコミットで検出されない場合（修正された場合）
                 if existing_violation_key not in current_violations_set and fixed == 'False':
@@ -79,11 +79,11 @@ class CSVExporter:
                 writer.writerow(row)
             
             # 新規違反を追加（重複チェック付き）
-            added_violations = set()  # 同じコミット内での重複チェック用
+            added_violations = set()
             for violation in current_violations:
                 # 行番号を含む同一性を判定
                 if len(violation) == 5:
-                    violation_key = (violation[0], violation[1], violation[2], violation[4])  # violation_id, file_path, message, line_number
+                    violation_key = (violation[0], violation[1], violation[4])  # violation_id, file_path, line_number
                 else:
                     violation_key = violation
                 
@@ -91,7 +91,7 @@ class CSVExporter:
                 violation_exists = False
                 for row in rows[1:]:
                     existing_line_number = row[4]  # Violation Line Number列（新しい位置）
-                    existing_violation_key = (row[0], row[2], row[3], existing_line_number)
+                    existing_violation_key = (row[0], row[2], existing_line_number)
                     if violation_key == existing_violation_key:
                         violation_exists = True
                         break

@@ -240,7 +240,7 @@ class DataManager:
     def process_violations_batch(self, initial_violations, commits_data, temp_dir, pkg_name):
         """違反データを一括処理してCSVデータのリストを作成"""
         violation_rows = []
-        violation_tracker = {}  # 違反追跡用: key=(violation_id, file_path, message, line_number), value=row_index
+        violation_tracker = {}  # 違反追跡用: key=(violation_id, file_path, line_number), value=row_index
         
         # 初期違反を処理
         for violation in initial_violations:
@@ -249,10 +249,10 @@ class DataManager:
                 violation_rows.append(row)
                 # 追跡用キーを作成
                 if len(violation) == 5:
-                    violation_key = (violation[0], violation[1], violation[2], violation[4])
+                    violation_key = (violation[0], violation[1], violation[4])
                 else:
                     line_number = self._extract_line_number_from_context(violation[3])
-                    violation_key = (violation[0], violation[1], violation[2], line_number)
+                    violation_key = (violation[0], violation[1], line_number)
                 violation_tracker[violation_key] = len(violation_rows) - 1
         
         # 各コミットの違反を処理
@@ -264,10 +264,10 @@ class DataManager:
             current_violations_set = set()
             for violation in current_violations:
                 if len(violation) == 5:
-                    violation_key = (violation[0], violation[1], violation[2], violation[4])
+                    violation_key = (violation[0], violation[1], violation[4])
                 else:
                     line_number = self._extract_line_number_from_context(violation[3])
-                    violation_key = (violation[0], violation[1], violation[2], line_number)
+                    violation_key = (violation[0], violation[1], line_number)
                 current_violations_set.add(violation_key)
             
             # 既存の違反で修正されたものをチェック
@@ -281,10 +281,10 @@ class DataManager:
             # 新規違反を追加
             for violation in current_violations:
                 if len(violation) == 5:
-                    violation_key = (violation[0], violation[1], violation[2], violation[4])
+                    violation_key = (violation[0], violation[1], violation[4])
                 else:
                     line_number = self._extract_line_number_from_context(violation[3])
-                    violation_key = (violation[0], violation[1], violation[2], line_number)
+                    violation_key = (violation[0], violation[1], line_number)
                 
                 if violation_key not in violation_tracker:
                     # 新規違反
@@ -367,10 +367,10 @@ class DataManager:
         current_violations_set = set()
         for violation in current_violations:
             if len(violation) == 5:
-                violation_key = (violation[0], violation[1], violation[2], violation[4])
+                violation_key = (violation[0], violation[1], violation[4])
             else:
                 line_number = self._extract_line_number_from_context(violation[3])
-                violation_key = (violation[0], violation[1], violation[2], line_number)
+                violation_key = (violation[0], violation[1], line_number)
             current_violations_set.add(violation_key)
         
         # 既存の違反で修正されたものをチェック
@@ -379,7 +379,6 @@ class DataManager:
                 existing_violation_key = (
                     row['Violation ID'], 
                     row['File Path'], 
-                    row['Message'], 
                     row['Violation Line Number']
                 )
                 
@@ -392,10 +391,10 @@ class DataManager:
         new_rows = []
         for violation in current_violations:
             if len(violation) == 5:
-                violation_key = (violation[0], violation[1], violation[2], violation[4])
+                violation_key = (violation[0], violation[1], violation[4])
             else:
                 line_number = self._extract_line_number_from_context(violation[3])
-                violation_key = (violation[0], violation[1], violation[2], line_number)
+                violation_key = (violation[0], violation[1], line_number)
             
             # 既存の違反かチェック
             existing_violation = False
@@ -403,7 +402,6 @@ class DataManager:
                 existing_key = (
                     row['Violation ID'], 
                     row['File Path'], 
-                    row['Message'], 
                     row['Violation Line Number']
                 )
                 if violation_key == existing_key:

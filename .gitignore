@@ -1,5 +1,6 @@
 .env
 *.log
+*.out
 dataset/
 __pycache__/
 logs/

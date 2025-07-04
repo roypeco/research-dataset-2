@@ -81,8 +81,8 @@ class Flake8Analyzer:
                     full_file_path = os.path.join(repo_path, file_path)
                     context = self.get_violation_context(full_file_path, line_number, 0)
                     
-                    # 重複チェック用のキーを作成（行番号を除く）
-                    violation_key = (error_code, file_path, message, context)
+                    # 重複チェック用のキーを作成（messageとcontextを除く）
+                    violation_key = (error_code, file_path, line_number)
                     
                     # 重複チェック
                     if violation_key not in seen_violations:
