@@ -16,7 +16,7 @@ class ParallelRepoAnalyzer:
         self.output_format = output_format.lower()  # 'csv' or 'parquet'
         self.track_line_numbers = track_line_numbers  # 行番号追跡（デフォルト有効）
         self.setup_logging()
-        self.START_DATE = '2022-01-01'
+        self.START_DATE = '2024-01-01'
         self.END_DATE = '2024-12-31'
     
     def setup_logging(self):
