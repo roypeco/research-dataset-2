@@ -11,9 +11,10 @@ import time
 class ParallelRepoAnalyzer:
     """プロジェクトごとに並列処理するリポジトリ分析クラス"""
     
-    def __init__(self, max_workers=4, output_format='csv'):
+    def __init__(self, max_workers=4, output_format='csv', track_line_numbers=True):
         self.max_workers = max_workers or min(cpu_count(), 8)  # CPUコア数または8の小さい方
         self.output_format = output_format.lower()  # 'csv' or 'parquet'
+        self.track_line_numbers = track_line_numbers  # 行番号追跡（デフォルト有効）
         self.setup_logging()
         self.START_DATE = '2022-01-01'
         self.END_DATE = '2024-12-31'
@@ -152,9 +153,11 @@ class ParallelRepoAnalyzer:
                     progress_percent = (i / total_commits_to_process) * 100
                     project_logger.info(f"Progress: {i}/{total_commits_to_process} commits processed ({progress_percent:.1f}%) for {pkg_name}")
             
-            # バッチ処理で違反データを一括処理
-            project_logger.info(f"Processing violations in batch for: {pkg_name}")
-            violation_rows = data_manager.process_violations_batch(initial_violations, commits_data, temp_dir, pkg_name)
+            # バッチ処理で違反データを一括処理（行番号追跡付き・最適化版）
+            project_logger.info(f"Processing violations in batch with optimized line tracking for: {pkg_name}")
+            violation_rows = data_manager.process_violations_batch_optimized(
+                initial_violations, commits_data, temp_dir, pkg_name
+            )
             
             # バッチ処理結果からDataFrameを作成
             project_logger.info(f"Creating DataFrame from batch results for: {pkg_name}")
@@ -286,16 +289,21 @@ def main():
     """メイン関数"""
     import sys
     
-    # コマンドライン引数からoutput_formatを取得
+    # コマンドライン引数から出力フォーマットを取得
     output_format = 'csv'  # デフォルト
+    
     if len(sys.argv) > 1:
+        # 引数：出力フォーマット
         if sys.argv[1].lower() in ['csv', 'parquet']:
             output_format = sys.argv[1].lower()
         else:
             print("Usage: python analyze_parallel.py [csv|parquet]")
             print("Default: csv")
+            print("Note: Line number tracking is always enabled")
+            sys.exit(1)
     
     print(f"Output format: {output_format.upper()}")
+    print(f"Line number tracking: ENABLED (always on)")
     
     analyzer = ParallelRepoAnalyzer(output_format=output_format)
     result = analyzer.analyze_all_repositories_parallel('jsons/out.json')
