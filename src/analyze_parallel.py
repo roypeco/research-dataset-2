@@ -116,14 +116,11 @@ class ParallelRepoAnalyzer:
             )
             project_logger.info(f"Found {len(initial_violations)} initial violations for {pkg_name}")
             
-            # DataFrameの初期化
-            project_logger.info(f"Initializing DataFrame for: {pkg_name}")
-            if not data_manager.initialize_fix_history_dataframe(initial_violations, commits[0], temp_dir):
-                project_logger.error(f"Failed to initialize DataFrame for: {pkg_name}")
-                return {'pkg_name': pkg_name, 'success': False, 'error': 'DataFrame initialization failed'}
-            project_logger.info(f"DataFrame initialized for: {pkg_name}")
-
-            # 各コミットで違反の状態を確認
+            # バッチ処理用のコミットデータを準備
+            project_logger.info(f"Preparing commit data for batch processing: {pkg_name}")
+            commits_data = [{'commit': commits[0], 'violations': initial_violations}]
+            
+            # 各コミットで違反の状態を確認（バッチ処理用データ収集）
             project_logger.info(f"Starting commit-by-commit analysis for {pkg_name}")
             processed_commits = 0
             skipped_commits = 0
@@ -146,16 +143,30 @@ class ParallelRepoAnalyzer:
                 
                 project_logger.info(f"Found {len(current_violations)} violations in commit {commit[:8]}")
                 
-                # DataFrameの更新
-                if not data_manager.update_fix_history_dataframe(current_violations, temp_dir, commit):
-                    project_logger.warning(f"Failed to update DataFrame for commit {commit[:8]}")
-                
+                # バッチ処理用データに追加
+                commits_data.append({'commit': commit, 'violations': current_violations})
                 processed_commits += 1
                 
                 # 進捗を定期的にログ出力
                 if i % 10 == 0:
                     progress_percent = (i / total_commits_to_process) * 100
                     project_logger.info(f"Progress: {i}/{total_commits_to_process} commits processed ({progress_percent:.1f}%) for {pkg_name}")
+            
+            # バッチ処理で違反データを一括処理
+            project_logger.info(f"Processing violations in batch for: {pkg_name}")
+            violation_rows = data_manager.process_violations_batch(initial_violations, commits_data, temp_dir, pkg_name)
+            
+            # バッチ処理結果からDataFrameを作成
+            project_logger.info(f"Creating DataFrame from batch results for: {pkg_name}")
+            if violation_rows:
+                import pandas as pd
+                headers = data_manager._get_feature_headers()
+                data_manager.fix_history_df = pd.DataFrame(violation_rows, columns=headers)
+                data_manager.fix_history_df = data_manager.optimize_dataframe_types(data_manager.fix_history_df)
+                project_logger.info(f"DataFrame created with {len(data_manager.fix_history_df)} rows for {pkg_name}")
+            else:
+                project_logger.warning(f"No violation data to process for: {pkg_name}")
+                return {'pkg_name': pkg_name, 'success': False, 'error': 'No violation data'}
             
             # DataFrameをファイルに保存
             project_logger.info(f"Saving DataFrame to {output_format.upper()} for: {pkg_name}")
