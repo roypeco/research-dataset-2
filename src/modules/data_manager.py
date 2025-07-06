@@ -237,10 +237,15 @@ class DataManager:
         """違反データのリストを一括でCSVに書き込み（効率化版）"""
         return self.csv_exporter.write_fix_history_csv_batch(csv_file, violation_rows)
 
-    def process_violations_batch(self, initial_violations, commits_data, temp_dir, pkg_name):
-        """違反データを一括処理してCSVデータのリストを作成"""
+    def process_violations_batch_optimized(self, initial_violations, commits_data, temp_dir, pkg_name):
+        """違反データを一括処理（行番号追跡付き・最適化版）"""
         violation_rows = []
         violation_tracker = {}  # 違反追跡用: key=(violation_id, file_path, line_number), value=row_index
+        
+        # プロジェクトロガーを取得
+        import logging
+        project_logger = logging.getLogger(f"project.{pkg_name}")
+        project_logger.info(f"Processing {len(initial_violations)} initial violations with optimized line tracking")
         
         # 初期違反を処理
         for violation in initial_violations:
@@ -255,12 +260,26 @@ class DataManager:
                     violation_key = (violation[0], violation[1], line_number)
                 violation_tracker[violation_key] = len(violation_rows) - 1
         
-        # 各コミットの違反を処理
-        for commit_data in commits_data[1:]:
+        project_logger.info(f"Initial violations processed: {len(violation_rows)} records")
+        
+        # 各コミットの違反を処理（行番号追跡付き・最適化版）
+        total_commits = len(commits_data) - 1
+        for commit_index, commit_data in enumerate(commits_data[1:], 1):
             commit_hash = commit_data['commit']
             current_violations = commit_data['violations']
             
-            # 現在の違反をセットに変換
+            if commit_index % 10 == 0 or commit_index == total_commits:
+                project_logger.info(f"Processing commit {commit_index}/{total_commits}: {commit_hash[:8]}")
+            
+            # 行番号マッピングを計算（前のコミットからの変更）
+            line_mappings = self._calculate_line_mappings_for_commit(temp_dir, commit_hash)
+            
+            # 既存違反の行番号を更新
+            updated_violations = self._update_violation_line_numbers_batch(
+                violation_tracker, violation_rows, line_mappings
+            )
+            
+            # 現在の違反をセットに変換（更新後の行番号で）
             current_violations_set = set()
             for violation in current_violations:
                 if len(violation) == 5:
@@ -270,15 +289,18 @@ class DataManager:
                     violation_key = (violation[0], violation[1], line_number)
                 current_violations_set.add(violation_key)
             
-            # 既存の違反で修正されたものをチェック
-            for violation_key, row_index in violation_tracker.items():
+            # 既存の違反で修正されたものをチェック（更新後の行番号で）
+            fixed_count = 0
+            for violation_key, row_index in list(violation_tracker.items()):
                 if violation_key not in current_violations_set:
                     # 違反が修正された
                     if violation_rows[row_index][-1] == 'False':  # まだ修正されていない場合
                         violation_rows[row_index][7] = commit_hash  # Fix Commit Hash
                         violation_rows[row_index][-1] = 'True'  # Fixed
+                        fixed_count += 1
             
             # 新規違反を追加
+            new_violations_count = 0
             for violation in current_violations:
                 if len(violation) == 5:
                     violation_key = (violation[0], violation[1], violation[4])
@@ -292,8 +314,85 @@ class DataManager:
                     if row:
                         violation_rows.append(row)
                         violation_tracker[violation_key] = len(violation_rows) - 1
+                        new_violations_count += 1
+            
+            # 重要な変更のみログ出力
+            if updated_violations > 0 or fixed_count > 0 or new_violations_count > 0:
+                if commit_index % 10 == 0 or any([updated_violations > 5, fixed_count > 5, new_violations_count > 5]):
+                    project_logger.info(
+                        f"Commit {commit_hash[:8]}: {updated_violations} lines updated, "
+                        f"{fixed_count} fixed, {new_violations_count} new violations"
+                    )
         
+        project_logger.info(f"Optimized batch processing completed: {len(violation_rows)} total records")
         return violation_rows
+    
+    def _calculate_line_mappings_for_commit(self, repo_path, commit_hash):
+        """指定されたコミットの行番号マッピングを計算"""
+        try:
+            return self.diff_tracker.calculate_line_mapping(repo_path, commit_hash)
+        except Exception as e:
+            print(f"Error calculating line mappings for {commit_hash}: {str(e)}")
+            return {}
+    
+    def _update_violation_line_numbers_batch(self, violation_tracker, violation_rows, line_mappings):
+        """バッチ処理で違反の行番号を更新"""
+        updated_count = 0
+        
+        if not line_mappings:
+            return updated_count
+        
+        # violation_trackerのキーを更新する必要があるため、新しい辞書を作成
+        new_violation_tracker = {}
+        
+        for violation_key, row_index in list(violation_tracker.items()):
+            violation_id, file_path, current_line_number = violation_key
+            
+            # まだ修正されていない違反のみ処理
+            if violation_rows[row_index][-1] == 'False':  # Fixed列
+                if file_path in line_mappings and str(current_line_number).isdigit():
+                    old_line = int(current_line_number)
+                    file_mapping = line_mappings[file_path]
+                    
+                    if old_line in file_mapping:
+                        new_line = file_mapping[old_line]
+                        if new_line is not None and new_line != old_line:
+                            # 行番号を更新
+                            violation_rows[row_index][4] = str(new_line)  # Violation Line Number列
+                            
+                            # 新しいキーでtracker辞書を更新
+                            new_key = (violation_id, file_path, str(new_line))
+                            new_violation_tracker[new_key] = row_index
+                            updated_count += 1
+                        else:
+                            # 行番号に変更がない場合は元のキーを保持
+                            new_violation_tracker[violation_key] = row_index
+                    else:
+                        # マッピングにない場合は元のキーを保持
+                        new_violation_tracker[violation_key] = row_index
+                else:
+                    # ファイルが変更されていないか、行番号が無効な場合
+                    new_violation_tracker[violation_key] = row_index
+            else:
+                # 既に修正された違反は更新しない
+                new_violation_tracker[violation_key] = row_index
+        
+        # violation_trackerを更新
+        violation_tracker.clear()
+        violation_tracker.update(new_violation_tracker)
+        
+        return updated_count
+    
+    def process_violations_batch_with_line_tracking(self, initial_violations, commits_data, temp_dir, pkg_name):
+        """違反データを一括処理（行番号追跡付き）- 最適化版にリダイレクト"""
+        return self.process_violations_batch_optimized(initial_violations, commits_data, temp_dir, pkg_name)
+    
+    def process_violations_batch_fast(self, initial_violations, commits_data, temp_dir, pkg_name, track_line_numbers=True):
+        """バッチ処理（行番号追跡は必須）"""
+        # 行番号追跡は必須のため、常に最適化版を使用
+        return self.process_violations_batch_optimized(
+            initial_violations, commits_data, temp_dir, pkg_name
+        )
     
     def create_fix_history_csv(self, pkg_name, initial_violations, initial_commit, temp_dir):
         """修正履歴のCSVファイルを作成（特徴量付き）"""
@@ -550,3 +649,12 @@ class DataManager:
                         updated_count += 1
         
         return updated_count 
+
+    def clear_all_caches(self):
+        """全てのキャッシュをクリア（メモリ節約）"""
+        self.feature_extractor.clear_cache()
+        # 他のキャッシュも必要に応じてクリア
+        if hasattr(self, 'csv_exporter') and hasattr(self.csv_exporter, 'clear_cache'):
+            self.csv_exporter.clear_cache()
+        if hasattr(self, 'parquet_exporter') and hasattr(self.parquet_exporter, 'clear_cache'):
+            self.parquet_exporter.clear_cache() 
