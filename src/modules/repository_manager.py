@@ -40,6 +40,40 @@ class RepositoryManager:
         files = result.stdout.strip().split('\n')
         return any(file.endswith('.py') for file in files)
     
+    def get_python_files_in_diff(self, repo_path, commit):
+        """diffがあったPythonファイルのリストを取得（削除されたファイルは除外）"""
+        # diff --name-status を使用して、ファイルの変更状態も取得
+        result = subprocess.run(['git', 'diff', '--name-status', f'{commit}^!'], 
+                              cwd=repo_path, capture_output=True, text=True)
+        
+        python_files = []
+        for line in result.stdout.strip().split('\n'):
+            if line and '\t' in line:
+                status, file_path = line.split('\t', 1)
+                # 削除されたファイル（D）は除外、追加（A）・変更（M）・リネーム（R）のみ対象
+                if file_path.endswith('.py') and not status.startswith('D'):
+                    # ファイルが実際に存在するかチェック
+                    full_path = os.path.join(repo_path, file_path)
+                    if os.path.exists(full_path):
+                        python_files.append(file_path)
+        
+        return python_files
+    
+    def get_deleted_python_files_in_diff(self, repo_path, commit):
+        """diffで削除されたPythonファイルのリストを取得"""
+        result = subprocess.run(['git', 'diff', '--name-status', f'{commit}^!'], 
+                              cwd=repo_path, capture_output=True, text=True)
+        
+        deleted_files = []
+        for line in result.stdout.strip().split('\n'):
+            if line and '\t' in line:
+                status, file_path = line.split('\t', 1)
+                # 削除されたファイル（D）のみ対象
+                if file_path.endswith('.py') and status.startswith('D'):
+                    deleted_files.append(file_path)
+        
+        return deleted_files
+    
     def cleanup_temp_dir(self, temp_dir):
         """一時ディレクトリを削除する"""
         if os.path.exists(temp_dir):

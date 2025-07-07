@@ -8,7 +8,7 @@ from modules.data_manager import DataManager
 class RepoAnalyzer:
     """リポジトリ分析のメインクラス"""
     
-    def __init__(self, output_format='csv'):
+    def __init__(self, output_format='parquet'):
         self.repo_manager = RepositoryManager()
         self.flake8_analyzer = Flake8Analyzer()
         self.data_manager = DataManager()
@@ -94,16 +94,20 @@ class RepoAnalyzer:
                 progress_percent = (i / total_commits_to_process) * 100
                 self.logger.info(f"Processing commit {i}/{total_commits_to_process} ({progress_percent:.1f}%): {commit[:8]} for {pkg_name}")
                 
-                # diffにPythonファイルがない場合はスキップ
-                if not self.repo_manager.has_python_files_in_diff(temp_dir, commit):
+                # diffがあったPythonファイルのリストを取得
+                changed_python_files = self.repo_manager.get_python_files_in_diff(temp_dir, commit)
+                if not changed_python_files:
                     self.logger.info(f"Skipping commit {commit[:8]} (no Python files changed)")
                     skipped_commits += 1
                     continue
+                
+                self.logger.info(f"Changed Python files in commit {commit[:8]}: {len(changed_python_files)} files")
                     
                 self.repo_manager.checkout_commit(temp_dir, commit)
-                current_violations = self.flake8_analyzer.parse_flake8_output(
-                    self.flake8_analyzer.run_flake8(temp_dir), temp_dir
-                )
+                
+                # 変更されたファイルのみに対してflake8を実行
+                flake8_output = self.flake8_analyzer.run_flake8_on_files(temp_dir, changed_python_files)
+                current_violations = self.flake8_analyzer.parse_flake8_output(flake8_output, temp_dir)
                 
                 self.logger.info(f"Found {len(current_violations)} violations in commit {commit[:8]}")
                 
@@ -188,13 +192,13 @@ def main():
     import sys
     
     # コマンドライン引数からoutput_formatを取得
-    output_format = 'csv'  # デフォルト
+    output_format = 'parquet'  # デフォルト
     if len(sys.argv) > 1:
         if sys.argv[1].lower() in ['csv', 'parquet']:
             output_format = sys.argv[1].lower()
         else:
             print("Usage: python analyze_main.py [csv|parquet]")
-            print("Default: csv")
+            print("Default: parquet")
     
     print(f"Output format: {output_format.upper()}")
     
