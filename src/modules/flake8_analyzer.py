@@ -36,6 +36,25 @@ class Flake8Analyzer:
             return result.stdout
         except subprocess.CalledProcessError as e:
             return e.stdout
+        except Exception as e:
+            print(f"Error running flake8: {str(e)}")
+            return ""
+    
+    def run_flake8_on_files(self, repo_path, file_paths):
+        """特定のファイルのみに対してflake8を実行する"""
+        if not file_paths:
+            return ""
+        
+        try:
+            # flake8に対象ファイルのパスを渡す
+            cmd = ['flake8'] + file_paths
+            result = subprocess.run(cmd, cwd=repo_path, capture_output=True, text=True)
+            return result.stdout
+        except subprocess.CalledProcessError as e:
+            return e.stdout
+        except Exception as e:
+            print(f"Error running flake8 on specific files: {str(e)}")
+            return ""
     
     def get_violation_context(self, file_path, line_number, context_lines=2):
         """違反が発生した行の前後のコンテキストを取得"""

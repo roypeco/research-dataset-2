@@ -131,16 +131,20 @@ class ParallelRepoAnalyzer:
                 progress_percent = (i / total_commits_to_process) * 100
                 project_logger.info(f"Processing commit {i}/{total_commits_to_process} ({progress_percent:.1f}%): {commit[:8]} for {pkg_name}")
                 
-                # diffにPythonファイルがない場合はスキップ
-                if not repo_manager.has_python_files_in_diff(temp_dir, commit):
+                # diffがあったPythonファイルのリストを取得
+                changed_python_files = repo_manager.get_python_files_in_diff(temp_dir, commit)
+                if not changed_python_files:
                     project_logger.info(f"Skipping commit {commit[:8]} (no Python files changed)")
                     skipped_commits += 1
                     continue
+                
+                project_logger.info(f"Changed Python files in commit {commit[:8]}: {len(changed_python_files)} files")
                     
                 repo_manager.checkout_commit(temp_dir, commit)
-                current_violations = flake8_analyzer.parse_flake8_output(
-                    flake8_analyzer.run_flake8(temp_dir), temp_dir
-                )
+                
+                # 変更されたファイルのみに対してflake8を実行
+                flake8_output = flake8_analyzer.run_flake8_on_files(temp_dir, changed_python_files)
+                current_violations = flake8_analyzer.parse_flake8_output(flake8_output, temp_dir)
                 
                 project_logger.info(f"Found {len(current_violations)} violations in commit {commit[:8]}")
                 
