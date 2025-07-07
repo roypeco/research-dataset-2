@@ -11,7 +11,7 @@ import time
 class ParallelRepoAnalyzer:
     """プロジェクトごとに並列処理するリポジトリ分析クラス"""
     
-    def __init__(self, max_workers=4, output_format='csv', track_line_numbers=True):
+    def __init__(self, max_workers=4, output_format='parquet', track_line_numbers=True):
         self.max_workers = max_workers or min(cpu_count(), 8)  # CPUコア数または8の小さい方
         self.output_format = output_format.lower()  # 'csv' or 'parquet'
         self.track_line_numbers = track_line_numbers  # 行番号追跡（デフォルト有効）
@@ -290,7 +290,7 @@ def main():
     import sys
     
     # コマンドライン引数から出力フォーマットを取得
-    output_format = 'csv'  # デフォルト
+    output_format = 'parquet'  # デフォルト
     
     if len(sys.argv) > 1:
         # 引数：出力フォーマット
@@ -298,7 +298,7 @@ def main():
             output_format = sys.argv[1].lower()
         else:
             print("Usage: python analyze_parallel.py [csv|parquet]")
-            print("Default: csv")
+            print("Default: parquet")
             print("Note: Line number tracking is always enabled")
             sys.exit(1)
     
