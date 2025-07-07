@@ -202,10 +202,22 @@ class DataManager:
                 pass
         
         # カテゴリ型の最適化（重複の多い文字列列）
-        category_columns = ['Violation ID', 'Category', 'File Extension']
+        # File Extensionは文字列として保持（pyarrowでのエラー回避）
+        category_columns = ['Violation ID', 'Category']
         for col in category_columns:
             if col in df.columns and df[col].dtype == 'object':
-                df[col] = df[col].astype('category')
+                try:
+                    df[col] = df[col].astype('category')
+                except Exception as e:
+                    # File Extensionなどの文字列列でエラーが発生した場合、そのまま文字列として保持
+                    print(f"Warning: Could not convert {col} to category type: {str(e)}")
+                    continue
+        
+        # 文字列列を明示的に文字列型として保持（数値型変換を防ぐ）
+        string_columns = ['File Extension', 'Function Name', 'Class Name', 'Message', 'Context']
+        for col in string_columns:
+            if col in df.columns:
+                df[col] = df[col].astype('string')
         
         return df
     
