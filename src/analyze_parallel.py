@@ -97,7 +97,7 @@ class ParallelRepoAnalyzer:
             # コミットハッシュ取得
             project_logger.info(f"Getting commits in date range for: {pkg_name}")
             commits = repo_manager.get_commits_in_date_range(temp_dir, self.START_DATE, self.END_DATE)
-            if not commits or commits[0] == '':
+            if not commits or not isinstance(commits, list) or len(commits) == 0 or commits[0] == '':
                 project_logger.warning(f"No commits found in date range for: {pkg_name}")
                 return {'pkg_name': pkg_name, 'success': False, 'error': 'No commits'}
             project_logger.info(f"Found {len(commits)} commits for {pkg_name}")
@@ -115,7 +115,8 @@ class ParallelRepoAnalyzer:
             initial_violations = flake8_analyzer.parse_flake8_output(
                 flake8_analyzer.run_flake8(temp_dir), temp_dir
             )
-            project_logger.info(f"Found {len(initial_violations)} initial violations for {pkg_name}")
+            violations_count = len(initial_violations) if initial_violations else 0
+            project_logger.info(f"Found {violations_count} initial violations for {pkg_name}")
             
             # バッチ処理用のコミットデータを準備
             project_logger.info(f"Preparing commit data for batch processing: {pkg_name}")
@@ -138,7 +139,8 @@ class ParallelRepoAnalyzer:
                     skipped_commits += 1
                     continue
                 
-                project_logger.info(f"Changed Python files in commit {commit[:8]}: {len(changed_python_files)} files")
+                files_count = len(changed_python_files) if changed_python_files else 0
+                project_logger.info(f"Changed Python files in commit {commit[:8]}: {files_count} files")
                     
                 repo_manager.checkout_commit(temp_dir, commit)
                 
@@ -146,7 +148,8 @@ class ParallelRepoAnalyzer:
                 flake8_output = flake8_analyzer.run_flake8_on_files(temp_dir, changed_python_files)
                 current_violations = flake8_analyzer.parse_flake8_output(flake8_output, temp_dir)
                 
-                project_logger.info(f"Found {len(current_violations)} violations in commit {commit[:8]}")
+                current_violations_count = len(current_violations) if current_violations else 0
+                project_logger.info(f"Found {current_violations_count} violations in commit {commit[:8]}")
                 
                 # バッチ処理用データに追加
                 commits_data.append({'commit': commit, 'violations': current_violations})
@@ -170,7 +173,8 @@ class ParallelRepoAnalyzer:
                 headers = data_manager._get_feature_headers()
                 data_manager.fix_history_df = pd.DataFrame(violation_rows, columns=headers)
                 data_manager.fix_history_df = data_manager.optimize_dataframe_types(data_manager.fix_history_df)
-                project_logger.info(f"DataFrame created with {len(data_manager.fix_history_df)} rows for {pkg_name}")
+                df_rows = len(data_manager.fix_history_df) if hasattr(data_manager, 'fix_history_df') and data_manager.fix_history_df is not None else 0
+                project_logger.info(f"DataFrame created with {df_rows} rows for {pkg_name}")
             else:
                 project_logger.warning(f"No violation data to process for: {pkg_name}")
                 return {'pkg_name': pkg_name, 'success': False, 'error': 'No violation data'}
@@ -185,7 +189,7 @@ class ParallelRepoAnalyzer:
             
             if output_file:
                 project_logger.info(f"{output_format.upper()} file saved: {output_file}")
-                total_violations = len(data_manager.fix_history_df) if hasattr(data_manager, 'fix_history_df') else 0
+                total_violations = len(data_manager.fix_history_df) if hasattr(data_manager, 'fix_history_df') and data_manager.fix_history_df is not None else 0
             else:
                 project_logger.error(f"Failed to save {output_format.upper()} file for: {pkg_name}")
                 return {'pkg_name': pkg_name, 'success': False, 'error': f'{output_format.upper()} save failed'}
