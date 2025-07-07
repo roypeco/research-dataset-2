@@ -1,4 +1,5 @@
 import pandas as pd
+import logging
 from pathlib import Path
 
 class ParquetExporter:
@@ -6,6 +7,7 @@ class ParquetExporter:
     
     def __init__(self, data_manager):
         self.data_manager = data_manager
+        self.logger = logging.getLogger(__name__)
     
     def save_fix_history_to_parquet(self, pkg_name, dataframe):
         """DataFrameをParquetファイルに保存"""
@@ -31,15 +33,19 @@ class ParquetExporter:
             
             return parquet_file
             
-        except ImportError:
-            print("Warning: pyarrow not installed. Install with: pip install pyarrow")
+        except ImportError as e:
+            self.logger.error(f"pyarrow not installed. Install with: pip install pyarrow")
+            self.logger.error(f"ImportError details: {str(e)}")
+            self.logger.warning("FALLBACK: Saving as CSV instead of Parquet")
             # フォールバックとしてCSV保存
             from .csv_exporter import CSVExporter
             csv_exporter = CSVExporter(self.data_manager)
             return csv_exporter.save_fix_history_to_csv(pkg_name, dataframe)
         except Exception as e:
-            print(f"Error saving to parquet: {str(e)}")
+            self.logger.error(f"Failed to save to parquet: {str(e)}")
+            self.logger.error(f"Exception type: {type(e).__name__}")
+            self.logger.warning("FALLBACK: Saving as CSV instead of Parquet")
             # フォールバックとしてCSV保存
             from .csv_exporter import CSVExporter
             csv_exporter = CSVExporter(self.data_manager)
-            return csv_exporter.save_fix_history_to_csv(pkg_name, dataframe) 
+            return csv_exporter.save_fix_history_to_csv(pkg_name, dataframe)
