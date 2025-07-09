@@ -120,7 +120,7 @@ class ParallelRepoAnalyzer:
             
             # バッチ処理用のコミットデータを準備
             project_logger.info(f"Preparing commit data for batch processing: {pkg_name}")
-            commits_data = [{'commit': commits[0], 'violations': initial_violations}]
+            commits_data = [{'commit': commits[0], 'violations': initial_violations, 'changed_files': []}]
             
             # 各コミットで違反の状態を確認（バッチ処理用データ収集）
             project_logger.info(f"Starting commit-by-commit analysis for {pkg_name}")
@@ -151,8 +151,12 @@ class ParallelRepoAnalyzer:
                 current_violations_count = len(current_violations) if current_violations else 0
                 project_logger.info(f"Found {current_violations_count} violations in commit {commit[:8]}")
                 
-                # バッチ処理用データに追加
-                commits_data.append({'commit': commit, 'violations': current_violations})
+                # バッチ処理用データに追加（変更されたファイル情報を含む）
+                commits_data.append({
+                    'commit': commit, 
+                    'violations': current_violations, 
+                    'changed_files': changed_python_files
+                })
                 processed_commits += 1
                 
                 # 進捗を定期的にログ出力
