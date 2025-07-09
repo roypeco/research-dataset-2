@@ -279,9 +279,11 @@ class DataManager:
         for commit_index, commit_data in enumerate(commits_data[1:], 1):
             commit_hash = commit_data['commit']
             current_violations = commit_data['violations']
+            changed_files = commit_data.get('changed_files', [])  # 変更されたファイルのリスト
             
             if commit_index % 10 == 0 or commit_index == total_commits:
                 project_logger.info(f"Processing commit {commit_index}/{total_commits}: {commit_hash[:8]}")
+                project_logger.info(f"Changed files in this commit: {len(changed_files) if changed_files else 0}")
             
             # 行番号マッピングを計算（前のコミットからの変更）
             line_mappings = self._calculate_line_mappings_for_commit(temp_dir, commit_hash)
@@ -302,14 +304,24 @@ class DataManager:
                 current_violations_set.add(violation_key)
             
             # 既存の違反で修正されたものをチェック（更新後の行番号で）
+            # 重要：違反が発生しているファイルが変更されたファイルに含まれている場合のみ修正判定を行う
             fixed_count = 0
+            ignored_count = 0  # 変更されていないファイルの違反数をカウント
             for violation_key, row_index in list(violation_tracker.items()):
+                violation_id, file_path, line_number = violation_key
+                
                 if violation_key not in current_violations_set:
-                    # 違反が修正された
-                    if violation_rows[row_index][-1] == 'False':  # まだ修正されていない場合
-                        violation_rows[row_index][7] = commit_hash  # Fix Commit Hash
-                        violation_rows[row_index][-1] = 'True'  # Fixed
-                        fixed_count += 1
+                    # 違反が見つからないが、そのファイルが変更されているかチェック
+                    if changed_files and file_path in changed_files:
+                        # ファイルが変更されており、違反が見つからない→修正された
+                        if violation_rows[row_index][-1] == 'False':  # まだ修正されていない場合
+                            violation_rows[row_index][7] = commit_hash  # Fix Commit Hash
+                            violation_rows[row_index][-1] = 'True'  # Fixed
+                            fixed_count += 1
+                    else:
+                        # ファイルが変更されていない→違反は存在しているが、flake8が実行されていないだけ
+                        # 修正されたとは判定しない
+                        ignored_count += 1
             
             # 新規違反を追加
             new_violations_count = 0
@@ -329,11 +341,12 @@ class DataManager:
                         new_violations_count += 1
             
             # 重要な変更のみログ出力
-            if updated_violations > 0 or fixed_count > 0 or new_violations_count > 0:
+            if updated_violations > 0 or fixed_count > 0 or new_violations_count > 0 or ignored_count > 0:
                 if commit_index % 10 == 0 or any([updated_violations > 5, fixed_count > 5, new_violations_count > 5]):
                     project_logger.info(
                         f"Commit {commit_hash[:8]}: {updated_violations} lines updated, "
-                        f"{fixed_count} fixed, {new_violations_count} new violations"
+                        f"{fixed_count} fixed, {new_violations_count} new violations, "
+                        f"{ignored_count} violations ignored (unchanged files)"
                     )
         
         project_logger.info(f"Optimized batch processing completed: {len(violation_rows)} total records")
